@@ -1,0 +1,14 @@
+{
+  "filters": [
+    {
+      "phoneNumber": "DEFAULT",
+      "patterns": [
+        "(?:code|otp|pin|token|verification)[:\\s]+([A-Za-z0-9]{4,8})",
+        "\\b(\\d{4,8})\\b"
+      ]
+    }
+  ],
+  "autoDeleteMinutes": 10,
+  "globalForwarding": true,
+  "lastClearLogTs": 0
+}
