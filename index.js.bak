@@ -1,0 +1,375 @@
+'use strict';
+
+/**
+ * GetOTP v4.0 — Render Server
+ *
+ * Completely independent. No Firebase. No Cloudflare.
+ * Android app POSTs SMS here → OTP extracted immediately in-process.
+ *
+ * Speed path:
+ *   POST /sms  → extractCode() → Map.set()  → 200 response   ← < 2ms server-side
+ *   GET  /get  → Map.get()     → age check  → JSON response   ← < 1ms server-side
+ *
+ * Endpoints:
+ *   POST /sms              Android app pushes SMS here (X-Api-Key header)
+ *   GET  /get?number=XXXX  OTP fetch (public, same response as old system)
+ *   POST /notify           Dashboard toggle forwarding
+ *   GET  /api/settings     Android polls for forwarding state (every 30s)
+ *   GET  /api/sms          Dashboard: list recent SMS
+ *   GET  /api/filters       Dashboard: get filter rules
+ *   POST /api/filters       Dashboard: save filter rules
+ *   POST /api/settings      Dashboard: update settings
+ *   POST /api/clear-log    Dashboard: clear SMS store
+ *   GET  /api/export       Download config JSON
+ *   POST /api/import       Import config JSON
+ *   GET  /health           Render health-check + UptimeRobot keep-alive
+ *   GET  /                 Dashboard UI
+ */
+
+const express = require('express');
+const cors    = require('cors');
+const cron    = require('node-cron');
+const path    = require('path');
+const fs      = require('fs');
+require('dotenv').config();
+
+// ── Config validation ─────────────────────────────────────────────────────────
+const {
+    API_KEY,             // shared secret: Android app → X-Api-Key header
+    WORKER_SECRET,       // dashboard + /notify → Authorization / X-Worker-Secret
+    PORT = 10000,
+    RENDER_EXTERNAL_URL,
+} = process.env;
+
+const DASHBOARD_SECRET = WORKER_SECRET || API_KEY || '';
+
+if (!API_KEY)      console.warn('[Config] API_KEY not set — POST /sms accepts all requests');
+if (!WORKER_SECRET) console.warn('[Config] WORKER_SECRET not set — dashboard/notify open');
+
+// ── Persistent config (filters + settings) ────────────────────────────────────
+// Stored in data/config.json. On Render free tier this file survives service
+// restarts but is wiped on new deployments. Commit the file to git to persist
+// across deployments, or use the Export button to back it up.
+
+const CONFIG_FILE = path.join(__dirname, 'data', 'config.json');
+
+const DEFAULT_CONFIG = {
+    filters: [
+        {
+            phoneNumber: 'DEFAULT',
+            patterns: [
+                '(?:code|otp|pin|token|is)[:\\s]+([A-Za-z0-9]{4,8})',
+                '\\b(\\d{4,8})\\b',
+            ],
+        },
+    ],
+    autoDeleteMinutes: 10,
+    globalForwarding:  true,
+    lastClearLogTs:    0,
+};
+
+let config = { ...DEFAULT_CONFIG };
+
+function loadConfig() {
+    try {
+        if (fs.existsSync(CONFIG_FILE)) {
+            config = { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) };
+            console.log('[Config] Loaded from', CONFIG_FILE);
+        }
+    } catch (e) {
+        console.error('[Config] Load error (using defaults):', e.message);
+    }
+}
+
+function saveConfig() {
+    try {
+        fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
+    } catch (e) {
+        console.error('[Config] Save error:', e.message);
+    }
+}
+
+loadConfig();
+
+// ── In-memory stores ──────────────────────────────────────────────────────────
+// Both are simple Maps — O(1) reads and writes. No DB I/O on the hot path.
+// SMS and OTP records are short-lived (10 min / 2 min respectively) so memory
+// footprint is always small even under heavy use.
+
+const smsStore = new Map();   // id → {sender,recipient,message,arrivedAt,deleteAt,status,extractedCode}
+const otpStore = new Map();   // safeNum → {otp,ts,smsKey,success}
+
+// ── OTP extraction ─────────────────────────────────────────────────────────────
+// Pure CPU — runs synchronously inside the POST /sms handler.
+// Typical time: < 0.5ms.
+
+const TEXT_TO_NUM = { zero:'0',one:'1',two:'2',three:'3',four:'4',
+                      five:'5',six:'6',seven:'7',eight:'8',nine:'9' };
+
+function convertTextToNumber(text) {
+    let r = text.toLowerCase();
+    for (const [w, d] of Object.entries(TEXT_TO_NUM))
+        r = r.replace(new RegExp('\\b' + w + '\\b', 'g'), d);
+    const digits = r.match(/\d+/g);
+    return digits ? digits.join('') : text;
+}
+
+function extractCode(message, sender, recipient) {
+    if (!message) return null;
+    const rules = config.filters || [];
+
+    let patterns = [];
+    for (const rule of rules) {
+        if (rule.phoneNumber === 'DEFAULT') continue;
+        const ns = (sender    || '').toUpperCase().replace(/[\s_-]/g, '');
+        const nr = (recipient || '').toUpperCase().replace(/[\s_-]/g, '');
+        const nk = rule.phoneNumber.toUpperCase().replace(/[\s_-]/g, '');
+        if (ns.includes(nk) || nk.includes(ns) || nr.includes(nk) || nk.includes(nr)) {
+            patterns = rule.patterns || [];
+            break;
+        }
+    }
+    if (!patterns.length) {
+        const def = rules.find(r => r.phoneNumber === 'DEFAULT');
+        if (def) patterns = def.patterns || [];
+    }
+
+    for (const pat of patterns) {
+        try {
+            const m = message.match(new RegExp(pat, 'i'));
+            if (m && m[1]) return convertTextToNumber(m[1].trim());
+        } catch { /* bad regex */ }
+    }
+    return null;
+}
+
+const toSafeKey = s => s.replace(/[.#$[\]/]/g, '_');
+
+// ── Auth middleware ───────────────────────────────────────────────────────────
+
+function requireApiKey(req, res, next) {
+    if (!API_KEY) return next();   // not configured — open
+    const k = req.headers['x-api-key'] || req.headers['x-worker-secret'];
+    if (k !== API_KEY && k !== WORKER_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+    next();
+}
+
+function requireDashboard(req, res, next) {
+    if (!DASHBOARD_SECRET) return next();
+    const auth = req.headers['authorization'] || '';
+    const token = auth.replace('Bearer ', '');
+    if (token !== DASHBOARD_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+    next();
+}
+
+// ── Express app ───────────────────────────────────────────────────────────────
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '512kb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ── GET /health ───────────────────────────────────────────────────────────────
+app.get('/health', (_req, res) => res.json({ status: 'ok', ts: Date.now() }));
+
+// ── POST /sms — Android app pushes every incoming SMS ─────────────────────────
+// This is the hot path. Must complete in microseconds server-side.
+//
+// The Android app calls this from SmsReceiver.onReceive() via OkHttp async
+// (non-blocking). Connection pool means TLS is already established on the
+// second and subsequent requests — RTT is the only latency.
+
+app.post('/sms', requireApiKey, (req, res) => {
+    const { sender, recipient, message, arrivedAt } = req.body || {};
+
+    if (!recipient || !message)
+        return res.status(400).json({ error: 'recipient and message are required' });
+
+    if (!config.globalForwarding)
+        return res.json({ success: false, reason: 'forwarding_disabled' });
+
+    const ts       = arrivedAt || Date.now();
+    const safeNum  = toSafeKey(recipient);
+    const deleteAt = ts + config.autoDeleteMinutes * 60_000;
+    const msgId    = `${ts}_${Math.random().toString(36).slice(2, 9)}`;
+
+    // ── OTP extraction: synchronous, in-process, < 1ms ──────────────────────
+    const otp = extractCode(message, sender, recipient);
+
+    smsStore.set(msgId, {
+        sender:        sender || '',
+        recipient,
+        message,
+        arrivedAt:     ts,
+        deleteAt,
+        status:        'pending',
+        extractedCode: otp || null,
+    });
+
+    if (otp) {
+        const existing = otpStore.get(safeNum);
+        if (!existing || ts >= (existing.ts || 0)) {
+            otpStore.set(safeNum, { otp, ts, smsKey: msgId, success: true });
+        }
+    }
+
+    // Respond IMMEDIATELY — the Android app is waiting on this acknowledgement
+    res.json({ success: true, msgId, extracted: otp || null });
+
+    if (otp) console.log(`[/sms] ${msgId} ${sender}→${recipient} OTP=${otp}`);
+    else     console.log(`[/sms] ${msgId} ${sender}→${recipient} (no OTP extracted)`);
+});
+
+// ── GET /get?number=XXXX ──────────────────────────────────────────────────────
+// Exact same response contract as the old get.html / Cloudflare Worker.
+// { success: true, otp: "123456" }  or  { success: false, otp: "" }
+// 2-minute age gate on arrivedAt timestamp (same as original system).
+
+app.get('/get', (req, res) => {
+    const { number } = req.query;
+    if (!number) return res.status(400).json({ success: false, error: 'number param required' });
+
+    const safeNum        = toSafeKey(number);
+    const MAX_OTP_AGE_MS = 2 * 60_000;   // 2 minutes — same as original
+
+    const entry = otpStore.get(safeNum);
+
+    if (entry && entry.success) {
+        const age = Date.now() - (entry.ts || 0);
+        if (age <= MAX_OTP_AGE_MS) {
+            res.json({ success: true, otp: entry.otp || '' });
+            // Mark SMS as used (fire-and-forget)
+            const sms = entry.smsKey ? smsStore.get(entry.smsKey) : null;
+            if (sms) { sms.status = 'used'; sms.viewedAt = Date.now(); }
+            return;
+        }
+        otpStore.delete(safeNum);   // expired — clear
+    }
+
+    res.json({ success: false, otp: '' });
+});
+
+// ── GET /api/settings — Android polls this every 30 s ─────────────────────────
+// Returns current globalForwarding state and lastClearLogTs.
+// Protected by the same API key as POST /sms.
+
+app.get('/api/settings', requireApiKey, (_req, res) => {
+    res.json({
+        globalForwarding:  config.globalForwarding,
+        autoDeleteMinutes: config.autoDeleteMinutes,
+        clearLogTs:        config.lastClearLogTs || 0,
+    });
+});
+
+// ── POST /notify — dashboard forwarding toggle ────────────────────────────────
+// Accepts { action: "enable"|"disable" } with X-Worker-Secret header.
+// Same API as the old Cloudflare Worker /notify.
+
+app.post('/notify', (req, res) => {
+    const secret = req.headers['x-worker-secret'] || req.headers['x-server-secret'];
+    if (DASHBOARD_SECRET && secret !== DASHBOARD_SECRET)
+        return res.status(401).json({ error: 'Unauthorized' });
+
+    const { action } = req.body || {};
+    if (action === 'enable')  { config.globalForwarding = true;  saveConfig(); }
+    if (action === 'disable') { config.globalForwarding = false; saveConfig(); }
+
+    if (action === 'enable' || action === 'disable') {
+        console.log(`[/notify] Forwarding ${action}d`);
+        return res.json({ success: true, globalForwarding: config.globalForwarding });
+    }
+    res.status(400).json({ error: 'action must be "enable" or "disable"' });
+});
+
+// ── Dashboard API (all require dashboard auth) ────────────────────────────────
+
+app.get('/api/sms', requireDashboard, (_req, res) => {
+    const list = [];
+    for (const [id, s] of smsStore) list.push({ id, ...s });
+    list.sort((a, b) => (b.arrivedAt || 0) - (a.arrivedAt || 0));
+    res.json(list.slice(0, 200));
+});
+
+app.get('/api/filters', requireDashboard, (_req, res) => res.json(config.filters || []));
+
+app.post('/api/filters', requireDashboard, (req, res) => {
+    const { filters } = req.body || {};
+    if (!Array.isArray(filters)) return res.status(400).json({ error: 'filters must be an array' });
+    config.filters = filters;
+    saveConfig();
+    res.json({ success: true, count: filters.length });
+});
+
+app.post('/api/settings', requireDashboard, (req, res) => {
+    const { autoDeleteMinutes, globalForwarding } = req.body || {};
+    if (autoDeleteMinutes != null) config.autoDeleteMinutes = Number(autoDeleteMinutes);
+    if (globalForwarding  != null) config.globalForwarding  = Boolean(globalForwarding);
+    saveConfig();
+    res.json({ success: true });
+});
+
+app.post('/api/clear-log', requireDashboard, (_req, res) => {
+    smsStore.clear();
+    otpStore.clear();
+    config.lastClearLogTs = Date.now();
+    saveConfig();
+    console.log('[api/clear-log] Stores cleared');
+    res.json({ success: true, ts: config.lastClearLogTs });
+});
+
+app.get('/api/export', requireDashboard, (_req, res) => {
+    res.setHeader('Content-Disposition', 'attachment; filename="getotp-config.json"');
+    res.json(config);
+});
+
+app.post('/api/import', requireDashboard, (req, res) => {
+    const { filters, autoDeleteMinutes, globalForwarding } = req.body || {};
+    if (Array.isArray(filters))       config.filters           = filters;
+    if (autoDeleteMinutes != null)    config.autoDeleteMinutes = Number(autoDeleteMinutes);
+    if (globalForwarding  != null)    config.globalForwarding  = Boolean(globalForwarding);
+    saveConfig();
+    res.json({ success: true });
+});
+
+// Dashboard login check (just validates the secret)
+app.post('/api/auth', (req, res) => {
+    const { secret } = req.body || {};
+    if (!DASHBOARD_SECRET || secret === DASHBOARD_SECRET)
+        return res.json({ success: true, token: DASHBOARD_SECRET });
+    res.status(401).json({ success: false });
+});
+
+// ── Auto-delete cron (every 1 minute) ─────────────────────────────────────────
+cron.schedule('* * * * *', () => {
+    const now = Date.now();
+    let del = 0;
+    for (const [id, s] of smsStore) {
+        if (s.deleteAt && now >= s.deleteAt) { smsStore.delete(id); del++; }
+    }
+    for (const [k, e] of otpStore) {
+        if (now - (e.ts || 0) > 2 * 60_000) otpStore.delete(k);
+    }
+    if (del) console.log(`[autoDelete] Removed ${del} SMS record(s)`);
+});
+
+// ── Self-ping keep-alive (every 10 minutes) ───────────────────────────────────
+// Render free web services sleep after 15 min of no HTTP traffic.
+// Also add a free UptimeRobot monitor on /health every 5 min for reliability.
+
+if (RENDER_EXTERNAL_URL) {
+    const pingUrl = `${RENDER_EXTERNAL_URL}/health`;
+    setInterval(async () => {
+        try {
+            const r = await fetch(pingUrl, { signal: AbortSignal.timeout(10_000) });
+            if (r.ok) console.log('[keepAlive] OK');
+        } catch (e) { console.warn('[keepAlive] ping failed:', e.message); }
+    }, 10 * 60_000);
+    console.log('[KeepAlive] Self-ping enabled:', pingUrl);
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+app.listen(PORT, () => {
+    console.log(`[Server] GetOTP v4.0 Render Server on port ${PORT}`);
+    console.log('[Server] SMS store: in-memory Map (O(1) reads/writes)');
+    console.log('[Server] Endpoints: POST /sms  GET /get  GET /api/settings  POST /notify  GET /health');
+});
