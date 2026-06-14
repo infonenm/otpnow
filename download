@@ -1,22 +1,957 @@
-# ═══════════════════════════════════════════════════════════════
-#  GetOTP Render Server — Environment Variables
-#  Set these in Render Dashboard → Environment → Environment Variables
-# ═══════════════════════════════════════════════════════════════
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GetOTP Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep:     #080d18;
+            --bg-panel:    #0d1526;
+            --bg-card:     #111b2e;
+            --bg-card-h:   #172035;
+            --border:      rgba(255,255,255,0.07);
+            --border-h:    rgba(255,255,255,0.14);
+            --teal:        #00d4aa;
+            --teal-dim:    rgba(0,212,170,0.12);
+            --teal-glow:   rgba(0,212,170,0.25);
+            --amber:       #f59e0b;
+            --amber-dim:   rgba(245,158,11,0.14);
+            --red:         #f87171;
+            --red-dim:     rgba(248,113,113,0.14);
+            --blue:        #60a5fa;
+            --blue-dim:    rgba(96,165,250,0.12);
+            --text-1:      #e2e8f0;
+            --text-2:      #94a3b8;
+            --text-3:      #475569;
+            --mono:        'JetBrains Mono', monospace;
+            --sans:        'DM Sans', sans-serif;
+            --radius:      12px;
+            --radius-lg:   18px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: var(--sans);
+            background-color: var(--bg-deep);
+            background-image:
+                radial-gradient(ellipse 80% 50% at 20% -10%, rgba(0,212,170,0.08) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 40% at 80% 110%, rgba(96,165,250,0.07) 0%, transparent 55%);
+            min-height: 100vh;
+            color: var(--text-1);
+        }
 
-# 1. Firebase Admin Service Account (FULL JSON string from Firebase Console)
-#    Firebase Console → Project Settings → Service accounts → Generate new private key
-#    Paste the entire JSON content as one line
-FIREBASE_SERVICE_ACCOUNT={"type":"service_account","project_id":"your-project","private_key_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"firebase-adminsdk-xxx@your-project.iam.gserviceaccount.com","client_id":"...","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_x509_cert_url":"..."}
+        /* ═══ LOGIN ═══ */
+        .login-container { display:flex; justify-content:center; align-items:center; min-height:100vh; padding:20px; }
+        .login-box {
+            background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--radius-lg);
+            padding:48px 40px 40px; width:100%; max-width:380px;
+            box-shadow:0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,212,170,0.06);
+        }
+        .login-box h2 { text-align:center; margin-bottom:32px; font-size:22px; font-weight:600; letter-spacing:-0.3px; }
+        .login-box h2 span { color:var(--teal); }
+        .login-box input {
+            width:100%; padding:13px 16px; background:var(--bg-card); border:1px solid var(--border);
+            border-radius:var(--radius); color:var(--text-1); font-family:var(--sans); font-size:15px;
+            margin-bottom:12px; outline:none; transition:border-color .2s, box-shadow .2s;
+        }
+        .login-box input:focus { border-color:var(--teal); box-shadow:0 0 0 3px var(--teal-glow); }
+        .login-box input::placeholder { color:var(--text-3); }
+        .login-box button {
+            width:100%; margin-top:8px; padding:14px; background:var(--teal); border:none;
+            border-radius:var(--radius); color:#021a15; font-family:var(--sans); font-size:15px;
+            font-weight:700; cursor:pointer; transition:opacity .2s, transform .15s;
+        }
+        .login-box button:hover { opacity:0.9; transform:translateY(-1px); }
+        .error { color:var(--red); text-align:center; margin-top:12px; font-size:13px; }
 
-# 2. Firebase Realtime Database URL
-FIREBASE_DATABASE_URL=https://your-project-default-rtdb.firebasedatabase.app
+        /* ═══ DASHBOARD ═══ */
+        .dashboard { display:none; min-height:100vh; padding:16px 20px 28px; }
+        .dashboard.active { display:block; }
 
-# 3. Firebase Client Config (for dashboard — safe to expose)
-#    Firebase Console → Project Settings → General → Your apps → Web app → Config
-FIREBASE_CONFIG={"apiKey":"AIza...","authDomain":"your-project.firebaseapp.com","databaseURL":"https://your-project-default-rtdb.firebasedatabase.app","projectId":"your-project","storageBucket":"your-project.appspot.com","messagingSenderId":"123456","appId":"1:123456:web:abcdef"}
+        /* ═══ TOP BAR ═══ */
+        .top-bar {
+            background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--radius-lg);
+            padding:14px 20px; margin-bottom:16px; display:flex; align-items:center; flex-wrap:wrap; gap:10px;
+        }
+        .logo { font-size:15px; font-weight:700; letter-spacing:-0.2px; color:var(--teal); display:flex; align-items:center; gap:8px; margin-right:8px; white-space:nowrap; }
+        .logo-icon { font-size:17px; }
+        .status-indicator { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .live-indicator {
+            display:inline-flex; align-items:center; gap:6px; background:var(--teal-dim);
+            border:1px solid rgba(0,212,170,0.2); padding:5px 12px; border-radius:20px;
+            font-size:12px; font-weight:600; color:var(--teal); letter-spacing:0.3px;
+        }
+        .live-dot { width:6px; height:6px; background:var(--teal); border-radius:50%; animation:pulse 2s ease-in-out infinite; }
+        .connection-status { padding:5px 12px; border-radius:20px; font-size:12px; font-weight:500; background:rgba(255,255,255,0.06); color:var(--text-2); }
+        .connection-status.connected  { background:var(--teal-dim); color:var(--teal); border:1px solid rgba(0,212,170,0.2); }
+        .connection-status.disconnected { background:var(--red-dim); color:var(--red); border:1px solid rgba(248,113,113,0.2); }
 
-# 4. Dashboard Secret (optional — for /notify endpoint auth backup)
-DASHBOARD_SECRET=any-random-string-here
+        .search-bar { display:flex; gap:8px; flex:1; min-width:220px; max-width:480px; }
+        .search-bar input {
+            flex:1; padding:9px 14px; background:var(--bg-card); border:1px solid var(--border);
+            border-radius:var(--radius); color:var(--text-1); font-family:var(--sans); font-size:13px; outline:none;
+        }
+        .search-bar input:focus { border-color:var(--teal); }
+        .search-bar input::placeholder { color:var(--text-3); }
+        .filter-dropdown {
+            padding:9px 12px; background:var(--bg-card); border:1px solid var(--border);
+            border-radius:var(--radius); color:var(--text-1); font-family:var(--sans); font-size:13px; cursor:pointer; outline:none;
+        }
 
-# 5. Port (auto-set by Render — do NOT set manually)
-# PORT=3000
+        /* ═══ BUTTONS ═══ */
+        .tb-btn { padding:8px 14px; border-radius:var(--radius); font-family:var(--sans); font-size:13px; font-weight:600; cursor:pointer; transition:all .18s; white-space:nowrap; border:1px solid transparent; }
+        .tb-btn:hover { transform:translateY(-1px); }
+        .clear-btn { padding:9px 14px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); color:var(--text-2); font-family:var(--sans); font-size:13px; font-weight:500; cursor:pointer; transition:all .18s; }
+        .clear-btn:hover { border-color:var(--border-h); color:var(--text-1); }
+
+        .config-btn {
+            padding:8px 14px; background:var(--blue-dim); border:1px solid rgba(96,165,250,0.25);
+            border-radius:var(--radius); color:var(--blue); font-family:var(--sans); font-size:13px;
+            font-weight:600; cursor:pointer; transition:all .18s; white-space:nowrap;
+        }
+        .config-btn:hover { background:rgba(96,165,250,0.2); transform:translateY(-1px); }
+
+        .forward-toggle-btn {
+            padding:8px 18px; border-radius:var(--radius); font-family:var(--sans); font-size:13px;
+            font-weight:700; cursor:pointer; transition:all .22s; min-width:160px; text-align:center;
+            border:1px solid transparent; letter-spacing:0.2px;
+        }
+        .forward-toggle-btn.enabled { background:rgba(0,212,170,0.15); border-color:rgba(0,212,170,0.35); color:var(--teal); box-shadow:0 0 18px rgba(0,212,170,0.18); }
+        .forward-toggle-btn.disabled { background:var(--red-dim); border-color:rgba(248,113,113,0.35); color:var(--red); box-shadow:0 0 14px rgba(248,113,113,0.15); }
+        .forward-toggle-btn:hover { transform:translateY(-1px); }
+        .forward-toggle-btn:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+
+        .clear-log-btn { padding:8px 14px; background:var(--blue-dim); border:1px solid rgba(96,165,250,0.2); border-radius:var(--radius); color:var(--blue); font-family:var(--sans); font-size:13px; font-weight:600; cursor:pointer; transition:all .18s; white-space:nowrap; }
+        .clear-log-btn:hover { background:rgba(96,165,250,0.2); transform:translateY(-1px); }
+        .clear-log-btn:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+
+        .test-msg-btn { padding:8px 16px; background:rgba(167,139,250,0.18); border:1px solid rgba(167,139,250,0.4); color:#c4b5fd; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; transition:all .2s; }
+        .test-msg-btn:hover { background:rgba(167,139,250,0.35); border-color:#a78bfa; color:#fff; transform:translateY(-1px); }
+        .test-msg-btn:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+
+        .clear-all-btn { padding:8px 14px; background:var(--red-dim); border:1px solid rgba(248,113,113,0.3); border-radius:var(--radius); color:var(--red); font-family:var(--sans); font-size:13px; font-weight:600; cursor:pointer; transition:all .18s; white-space:nowrap; }
+        .clear-all-btn:hover { background:rgba(248,113,113,0.22); transform:translateY(-1px); }
+
+        .logout-btn { padding:8px 14px; background:transparent; border:1px solid var(--border); border-radius:var(--radius); color:var(--text-2); font-family:var(--sans); font-size:13px; font-weight:500; cursor:pointer; transition:all .18s; }
+        .logout-btn:hover { border-color:var(--red); color:var(--red); }
+
+        @keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 0 0 var(--teal-glow)} 50%{opacity:.6;box-shadow:0 0 0 4px transparent} }
+
+        /* ═══ GRID ═══ */
+        .grid-container { display:grid; grid-template-columns:1fr 1fr; gap:16px; max-width:1600px; margin:0 auto; }
+        @media(max-width:1024px){.grid-container{grid-template-columns:1fr}}
+        .section { background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px; min-height:400px; }
+        .section-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:14px; border-bottom:1px solid var(--border); }
+        .section-title { font-size:11px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; display:flex; align-items:center; gap:10px; color:var(--text-2); }
+        .count-badge { background:rgba(255,255,255,0.08); border:1px solid var(--border); padding:3px 10px; border-radius:20px; font-size:12px; font-weight:700; font-family:var(--mono); color:var(--text-1); letter-spacing:0; text-transform:none; }
+
+        /* ═══ SMS CARDS ═══ */
+        .sms-list { display:flex; flex-direction:column; gap:10px; }
+        @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+        .sms-card {
+            background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+            padding:14px 16px; transition:background .2s, border-color .2s, box-shadow .2s;
+            animation:slideIn .28s ease-out both; position:relative; overflow:hidden;
+        }
+        .sms-card::before { content:''; position:absolute; left:0;top:0;bottom:0; width:3px; background:var(--teal); border-radius:3px 0 0 3px; opacity:0.7; }
+        .sms-card.used::before { background:var(--amber); opacity:0.5; }
+        .sms-card:hover { background:var(--bg-card-h); border-color:var(--border-h); box-shadow:0 4px 20px rgba(0,0,0,0.3); }
+        .sms-card.used { opacity:0.68; }
+        .sms-sender { font-size:12px; font-weight:600; color:var(--teal); margin-bottom:7px; letter-spacing:0.2px; }
+        .sms-card.used .sms-sender { color:var(--amber); }
+        .sms-message { color:var(--text-2); font-size:13px; line-height:1.55; margin-bottom:11px; }
+        .sms-code { display:inline-flex; align-items:center; gap:8px; background:rgba(0,212,170,0.12); border:1px solid rgba(0,212,170,0.28); color:var(--teal); padding:6px 14px; border-radius:8px; font-family:var(--mono); font-size:15px; font-weight:700; letter-spacing:2.5px; margin-bottom:9px; }
+        .sms-code.used { background:var(--amber-dim); border-color:rgba(245,158,11,0.28); color:var(--amber); }
+        .sms-time { color:var(--text-3); font-size:11px; font-family:var(--mono); letter-spacing:0.2px; }
+        .sms-status { display:inline-block; color:var(--teal); font-size:11px; margin-left:10px; font-family:var(--sans); }
+        .sms-status.used { color:var(--amber); }
+        .empty-state { text-align:center; padding:60px 20px; color:var(--text-3); }
+        .empty-state-icon { font-size:42px; margin-bottom:12px; opacity:0.6; }
+        .empty-state div:last-child { font-size:13px; letter-spacing:0.2px; }
+        .expiry-bar-wrap { height:2px; background:rgba(255,255,255,0.05); border-radius:2px; margin-top:10px; overflow:hidden; }
+        .expiry-bar { height:100%; border-radius:2px; transition:width 1s linear, background 1s; }
+        .expiry-countdown { font-size:10px; font-family:var(--mono); color:var(--text-3); margin-top:4px; letter-spacing:0.3px; }
+        .expiry-countdown.urgent { color:var(--red); }
+        @keyframes fadeOut { from{opacity:1;transform:scaleY(1);max-height:300px} to{opacity:0;transform:scaleY(0);max-height:0;padding:0;margin:0} }
+        .sms-card.expiring { animation:fadeOut .6s ease forwards; transform-origin:top; overflow:hidden; }
+
+        /* ═══ NOTIFICATION ═══ */
+        .notification {
+            position:fixed; top:20px; right:20px; background:var(--bg-panel); border:1px solid var(--border-h);
+            color:var(--text-1); padding:13px 20px; border-radius:var(--radius);
+            box-shadow:0 16px 40px rgba(0,0,0,0.5); transform:translateY(-12px) translateX(20px);
+            opacity:0; transition:all .28s cubic-bezier(0.34,1.56,0.64,1); z-index:1000;
+            font-size:14px; font-weight:500; max-width:340px;
+        }
+        .notification.show { transform:translateY(0) translateX(0); opacity:1; }
+
+        /* ═══ CONFIG MODAL ═══ */
+        .config-overlay {
+            display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
+            z-index:900; justify-content:center; align-items:flex-start; padding:40px 20px;
+            overflow-y:auto;
+        }
+        .config-overlay.open { display:flex; }
+        .config-modal {
+            background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--radius-lg);
+            width:100%; max-width:700px; padding:28px 32px; position:relative;
+            box-shadow:0 32px 80px rgba(0,0,0,0.6);
+        }
+        .config-modal h3 { font-size:18px; font-weight:700; color:var(--teal); margin-bottom:24px; display:flex; justify-content:space-between; align-items:center; }
+        .config-close { background:none; border:none; color:var(--text-3); font-size:22px; cursor:pointer; padding:4px 8px; }
+        .config-close:hover { color:var(--text-1); }
+        .config-section { margin-bottom:24px; }
+        .config-section h4 { font-size:13px; font-weight:700; color:var(--text-2); text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+        .config-row {
+            display:flex; align-items:center; gap:8px; padding:8px 12px; margin-bottom:6px;
+            background:var(--bg-card); border:1px solid var(--border); border-radius:8px; font-size:13px;
+        }
+        .config-row .pattern-text { flex:1; font-family:var(--mono); font-size:12px; color:var(--text-2); word-break:break-all; }
+        .config-row .phone-label { font-weight:600; color:var(--teal); min-width:120px; font-size:12px; }
+        .config-row .del-btn {
+            background:none; border:none; color:var(--red); cursor:pointer; font-size:16px;
+            padding:2px 6px; border-radius:4px; transition:background .15s;
+        }
+        .config-row .del-btn:hover { background:var(--red-dim); }
+        .config-add { display:flex; gap:8px; margin-top:8px; }
+        .config-add input {
+            flex:1; padding:9px 12px; background:var(--bg-card); border:1px solid var(--border);
+            border-radius:8px; color:var(--text-1); font-family:var(--mono); font-size:12px; outline:none;
+        }
+        .config-add input:focus { border-color:var(--teal); }
+        .config-add input::placeholder { color:var(--text-3); }
+        .config-add button {
+            padding:9px 16px; background:var(--teal-dim); border:1px solid rgba(0,212,170,0.3);
+            border-radius:8px; color:var(--teal); font-weight:600; font-size:12px; cursor:pointer;
+            transition:all .15s; white-space:nowrap;
+        }
+        .config-add button:hover { background:rgba(0,212,170,0.2); }
+        .setting-row { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+        .setting-row label { font-size:13px; color:var(--text-2); min-width:160px; }
+        .setting-row input[type=number] {
+            width:80px; padding:8px 12px; background:var(--bg-card); border:1px solid var(--border);
+            border-radius:8px; color:var(--text-1); font-family:var(--mono); font-size:13px; outline:none;
+        }
+        .setting-row input:focus { border-color:var(--teal); }
+        .save-config-btn {
+            padding:12px 24px; background:var(--teal); border:none; border-radius:var(--radius);
+            color:#021a15; font-weight:700; font-size:14px; cursor:pointer; transition:all .15s;
+            margin-top:8px;
+        }
+        .save-config-btn:hover { opacity:0.9; transform:translateY(-1px); }
+    </style>
+</head>
+<body>
+    <!-- ═══ LOGIN ═══ -->
+    <div id="loginScreen" class="login-container">
+        <div class="login-box">
+            <h2><span>GetOTP</span> Dashboard</h2>
+            <input type="email" id="emailInput" placeholder="Email address" autocomplete="email">
+            <input type="password" id="passwordInput" placeholder="Password" autocomplete="current-password">
+            <button onclick="login()">Login</button>
+            <div id="loginError" class="error"></div>
+        </div>
+    </div>
+
+    <!-- ═══ DASHBOARD ═══ -->
+    <div id="dashboard" class="dashboard">
+        <div class="top-bar">
+            <div class="logo"><span class="logo-icon">📱</span> GetOTP</div>
+            <div class="status-indicator">
+                <div class="live-indicator"><div class="live-dot"></div> Live</div>
+                <div id="connectionStatus" class="connection-status">Connecting...</div>
+                <button class="config-btn" onclick="openConfig()">⚙️ Filters & Settings</button>
+                <button id="forwardToggleBtn" class="forward-toggle-btn disabled" onclick="toggleGlobalForwarding()" disabled>⏳ Loading...</button>
+            </div>
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="🔍 Filter by number..." oninput="filterMessages()">
+                <select class="filter-dropdown" id="numberFilter" onchange="filterMessages()">
+                    <option value="">All Numbers</option>
+                </select>
+                <button class="clear-btn" onclick="clearFilters()">Clear</button>
+            </div>
+            <button class="clear-all-btn" onclick="clearAllMessages()">🗑️ Clear All</button>
+            <button class="clear-log-btn" id="clearLogBtn" onclick="clearForwardLog()">📋 Clear Log</button>
+            <button class="test-msg-btn" id="testMsgBtn" onclick="sendTestMessage()">📡 Test</button>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+
+        <div class="grid-container">
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Pending <span class="count-badge" id="pendingCount">0</span></div>
+                </div>
+                <div class="sms-list" id="pendingList">
+                    <div class="empty-state"><div class="empty-state-icon">📭</div><div>No pending messages</div></div>
+                </div>
+            </div>
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Used <span class="count-badge" id="usedCount">0</span></div>
+                </div>
+                <div class="sms-list" id="usedList">
+                    <div class="empty-state"><div class="empty-state-icon">📪</div><div>No used messages</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ CONFIG MODAL ═══ -->
+    <div id="configOverlay" class="config-overlay" onclick="if(event.target===this)closeConfig()">
+        <div class="config-modal">
+            <h3>⚙️ Filters & Settings <button class="config-close" onclick="closeConfig()">✕</button></h3>
+
+            <div class="config-section">
+                <h4>Default OTP Patterns</h4>
+                <div id="defaultPatternsList"></div>
+                <div class="config-add">
+                    <input id="newDefaultPattern" placeholder='Regex e.g. (?:code|otp)\s*[:#-]?\s*(\d{4,8})'>
+                    <button onclick="addDefaultPattern()">+ Add</button>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <h4>Number-Specific Rules</h4>
+                <div id="numberRulesList"></div>
+                <div class="config-add">
+                    <input id="newRulePhone" placeholder="Phone / sender name" style="max-width:140px">
+                    <input id="newRulePattern" placeholder="Pattern (leave empty for catch-all)">
+                    <button onclick="addNumberRule()">+ Add</button>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <h4>Settings</h4>
+                <div class="setting-row">
+                    <label>Auto-delete (minutes)</label>
+                    <input type="number" id="cfgAutoDelete" min="1" max="1440" value="10">
+                </div>
+            </div>
+
+            <button class="save-config-btn" onclick="saveConfig()">💾 Save All Changes</button>
+        </div>
+    </div>
+
+    <div id="notification" class="notification"></div>
+
+    <!-- Firebase Client SDK (for Auth + Realtime listeners) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <script>
+        // ═══════════════════════════════════════════════════════
+        //  GLOBALS
+        // ═══════════════════════════════════════════════════════
+        let database, auth, smsRef;
+        let autoDeleteMinutes = 10;
+        let allMessages = [], pendingMessages = [], usedMessages = [];
+        let isConnected = false;
+        let filterRules = [];
+        let appInitialized = false;
+        let globalForwardingState = null;
+
+        const textToNum = {
+            'zero':'0','one':'1','two':'2','three':'3','four':'4',
+            'five':'5','six':'6','seven':'7','eight':'8','nine':'9'
+        };
+
+        // ═══════════════════════════════════════════════════════
+        //  INIT — Fetch config from server, then init Firebase
+        // ═══════════════════════════════════════════════════════
+        window.addEventListener('load', async () => {
+            try {
+                const cfgRes = await fetch('/api/config');
+                const firebaseConfig = await cfgRes.json();
+                if (!firebaseConfig.apiKey) throw new Error('Invalid config');
+
+                firebase.initializeApp(firebaseConfig);
+                database = firebase.database();
+                database.goOnline();
+                auth = firebase.auth();
+                smsRef = database.ref('sms');
+
+                // Connection status
+                database.ref('.info/connected').on('value', snap => {
+                    isConnected = snap.val() === true;
+                    const el = document.getElementById('connectionStatus');
+                    if (isConnected) { el.textContent = '✓ Connected'; el.className = 'connection-status connected'; }
+                    else { el.textContent = '✗ Disconnected'; el.className = 'connection-status disconnected'; }
+                });
+
+                auth.onAuthStateChanged(user => {
+                    if (user) {
+                        document.getElementById('loginScreen').style.display = 'none';
+                        document.getElementById('dashboard').classList.add('active');
+                        if (!appInitialized) { appInitialized = true; init(); }
+                    } else {
+                        appInitialized = false;
+                        document.getElementById('loginScreen').style.display = 'flex';
+                        document.getElementById('dashboard').classList.remove('active');
+                    }
+                });
+            } catch (e) {
+                console.error('Failed to load config:', e);
+                document.body.innerHTML = '<div style="padding:40px;color:#f87171;font-family:monospace">Failed to connect to server. Check FIREBASE_CONFIG env var.</div>';
+            }
+        });
+
+        async function login() {
+            const email = document.getElementById('emailInput').value.trim();
+            const password = document.getElementById('passwordInput').value;
+            const errorEl = document.getElementById('loginError');
+            errorEl.textContent = '';
+            if (!email || !password) { errorEl.textContent = 'Enter email and password.'; return; }
+            try { await auth.signInWithEmailAndPassword(email, password); }
+            catch (err) {
+                errorEl.textContent = (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found')
+                    ? 'Incorrect email or password.' : 'Login failed: ' + err.message;
+            }
+        }
+        async function logout() {
+            await auth.signOut();
+            document.getElementById('emailInput').value = '';
+            document.getElementById('passwordInput').value = '';
+        }
+
+        async function init() {
+            await loadSettings();
+            await loadFilters();
+            loadMessages();
+            startAutoCleanup();
+            startTimeUpdater();
+            initForwardingToggle();
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  SETTINGS (from Firebase RTDB)
+        // ═══════════════════════════════════════════════════════
+        async function loadSettings() {
+            try {
+                const snap = await database.ref('settings/auto_delete_minutes').once('value');
+                if (snap.exists() && !isNaN(snap.val())) autoDeleteMinutes = parseFloat(snap.val());
+            } catch(e) {}
+            database.ref('settings/auto_delete_minutes').on('value', snap => {
+                if (snap.exists() && !isNaN(snap.val())) {
+                    const v = parseFloat(snap.val());
+                    if (v !== autoDeleteMinutes) { autoDeleteMinutes = v; reapplyDeleteAt(); }
+                }
+            });
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  FILTERS (from Firebase RTDB)
+        // ═══════════════════════════════════════════════════════
+        async function loadFilters() {
+            try {
+                const snap = await database.ref('filters').once('value');
+                if (snap.exists()) { filterRules = snap.val(); }
+            } catch (e) { console.error('loadFilters:', e); }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  CONFIG MODAL — Inline filter/settings management
+        // ═══════════════════════════════════════════════════════
+        function openConfig() {
+            renderConfigUI();
+            document.getElementById('configOverlay').classList.add('open');
+        }
+        function closeConfig() {
+            document.getElementById('configOverlay').classList.remove('open');
+        }
+
+        function renderConfigUI() {
+            // Default patterns
+            const defRule = (filterRules || []).find(r => r.phoneNumber === 'DEFAULT');
+            const defPatterns = defRule ? defRule.patterns || [] : [];
+            const defHtml = defPatterns.map((p, i) =>
+                `<div class="config-row">
+                    <span class="pattern-text">${escHtml(p)}</span>
+                    <button class="del-btn" onclick="removeDefaultPattern(${i})">✕</button>
+                </div>`
+            ).join('') || '<div style="color:var(--text-3);font-size:12px;padding:8px">No default patterns set</div>';
+            document.getElementById('defaultPatternsList').innerHTML = defHtml;
+
+            // Number-specific rules
+            const numRules = (filterRules || []).filter(r => r.phoneNumber !== 'DEFAULT');
+            const numHtml = numRules.map((r, i) =>
+                `<div class="config-row">
+                    <span class="phone-label">${escHtml(r.phoneNumber)}</span>
+                    <span class="pattern-text">${(r.patterns||[]).map(escHtml).join(', ') || '(catch-all)'}</span>
+                    <button class="del-btn" onclick="removeNumberRule(${i})">✕</button>
+                </div>`
+            ).join('') || '<div style="color:var(--text-3);font-size:12px;padding:8px">No number-specific rules</div>';
+            document.getElementById('numberRulesList').innerHTML = numHtml;
+
+            document.getElementById('cfgAutoDelete').value = autoDeleteMinutes;
+        }
+
+        function addDefaultPattern() {
+            const inp = document.getElementById('newDefaultPattern');
+            const val = inp.value.trim();
+            if (!val) return;
+            if (!Array.isArray(filterRules)) filterRules = [];
+            let def = filterRules.find(r => r.phoneNumber === 'DEFAULT');
+            if (!def) { def = { phoneNumber: 'DEFAULT', patterns: [] }; filterRules.push(def); }
+            def.patterns.push(val);
+            inp.value = '';
+            renderConfigUI();
+        }
+        function removeDefaultPattern(idx) {
+            const def = (filterRules || []).find(r => r.phoneNumber === 'DEFAULT');
+            if (def && def.patterns) { def.patterns.splice(idx, 1); renderConfigUI(); }
+        }
+        function addNumberRule() {
+            const phone = document.getElementById('newRulePhone').value.trim();
+            if (!phone) return;
+            const pat = document.getElementById('newRulePattern').value.trim();
+            if (!Array.isArray(filterRules)) filterRules = [];
+            const patterns = pat ? [pat] : [];
+            // Check if rule for this phone already exists
+            const existing = filterRules.find(r => r.phoneNumber === phone);
+            if (existing) {
+                if (pat) existing.patterns.push(pat);
+            } else {
+                // Insert before DEFAULT
+                const defIdx = filterRules.findIndex(r => r.phoneNumber === 'DEFAULT');
+                if (defIdx >= 0) filterRules.splice(defIdx, 0, { phoneNumber: phone, patterns });
+                else filterRules.push({ phoneNumber: phone, patterns });
+            }
+            document.getElementById('newRulePhone').value = '';
+            document.getElementById('newRulePattern').value = '';
+            renderConfigUI();
+        }
+        function removeNumberRule(idx) {
+            const numRules = (filterRules || []).filter(r => r.phoneNumber !== 'DEFAULT');
+            if (idx >= 0 && idx < numRules.length) {
+                const phone = numRules[idx].phoneNumber;
+                filterRules = filterRules.filter(r => r.phoneNumber !== phone || r.phoneNumber === 'DEFAULT');
+                // Re-add DEFAULT if it was accidentally removed
+                renderConfigUI();
+            }
+        }
+
+        async function saveConfig() {
+            try {
+                // Save filters
+                await database.ref('filters').set(filterRules || []);
+
+                // Save settings
+                const mins = parseInt(document.getElementById('cfgAutoDelete').value) || 10;
+                autoDeleteMinutes = mins;
+                await database.ref('settings/auto_delete_minutes').set(mins);
+                reapplyDeleteAt();
+
+                // Re-extract codes with new filters
+                allMessages.forEach(msg => {
+                    msg.extractedCode = msg.extractedCode || extractCode(msg.message || msg.code, msg.sender, msg.recipient);
+                });
+                displayMessages();
+
+                showNotification(`✅ Saved! ${(filterRules||[]).length} rules, auto-delete: ${mins} min`);
+                closeConfig();
+            } catch (e) {
+                showNotification('❌ Save failed: ' + e.message);
+            }
+        }
+
+        function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        // ═══════════════════════════════════════════════════════
+        //  CODE EXTRACTION (client-side, mirrors server)
+        // ═══════════════════════════════════════════════════════
+        function extractCode(message, sender, recipient) {
+            if (!message) return null;
+            let patterns = [];
+
+            for (const rule of (filterRules || [])) {
+                if (rule.phoneNumber === 'DEFAULT') continue;
+                const normSender = (sender || '').toUpperCase().replace(/[\s_-]/g, '');
+                const normRule = rule.phoneNumber.toUpperCase().replace(/[\s_-]/g, '');
+                const normRecipient = (recipient || '').toUpperCase().replace(/[\s_-]/g, '');
+                if (normSender.includes(normRule) || normRule.includes(normSender) ||
+                    normRecipient.includes(normRule) || normRule.includes(normRecipient)) {
+                    patterns = rule.patterns; break;
+                }
+            }
+            if (patterns.length === 0) {
+                const def = (filterRules || []).find(r => r.phoneNumber === 'DEFAULT');
+                if (def) patterns = def.patterns;
+            }
+            for (const pattern of (patterns || [])) {
+                try {
+                    const match = message.match(new RegExp(pattern, 'i'));
+                    if (match && match[1]) { let code = match[1].trim(); return convertTextToNumber(code); }
+                } catch (e) {}
+            }
+            return null;
+        }
+
+        function convertTextToNumber(text) {
+            let result = text.toLowerCase();
+            for (const [word, digit] of Object.entries(textToNum))
+                result = result.replace(new RegExp('\\b' + word + '\\b', 'g'), digit);
+            const digits = result.match(/\d+/g);
+            return digits ? digits.join('') : text;
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  FORWARDING TOGGLE
+        // ═══════════════════════════════════════════════════════
+        function initForwardingToggle() {
+            database.ref('settings/global_forwarding').on('value', snap => {
+                const enabled = snap.exists() ? snap.val() === true : true;
+                globalForwardingState = enabled;
+                const btn = document.getElementById('forwardToggleBtn');
+                btn.disabled = false;
+                if (enabled) { btn.className = 'forward-toggle-btn enabled'; btn.textContent = '🟢 Forwarding ON'; }
+                else { btn.className = 'forward-toggle-btn disabled'; btn.textContent = '🔴 Forwarding OFF'; }
+            });
+        }
+
+        async function toggleGlobalForwarding() {
+            if (globalForwardingState === null) return;
+            const btn = document.getElementById('forwardToggleBtn');
+            btn.disabled = true;
+            const newState = !globalForwardingState;
+            try {
+                await database.ref('settings/global_forwarding').set(newState);
+                // Server listener sends FCM automatically.
+                // Backup: call /notify directly.
+                notifyDevices(newState ? 'enable' : 'disable').catch(e => console.warn('/notify:', e.message));
+                showNotification(newState ? '🟢 Forwarding ENABLED' : '🔴 Forwarding DISABLED');
+            } catch (err) {
+                showNotification('❌ Failed: ' + err.message);
+                btn.disabled = false;
+            }
+        }
+
+        async function notifyDevices(action) {
+            const token = await auth.currentUser.getIdToken();
+            const res = await fetch('/notify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ action })
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  CLEAR FORWARD LOG
+        // ═══════════════════════════════════════════════════════
+        async function clearForwardLog() {
+            if (!confirm('Clear forward log on ALL devices?')) return;
+            const btn = document.getElementById('clearLogBtn');
+            btn.disabled = true; btn.textContent = '⏳ Clearing...';
+            try {
+                await database.ref('settings/clear_forward_log').set(Date.now());
+                showNotification('✅ Forward log cleared!');
+                btn.textContent = '✓ Cleared';
+                setTimeout(() => { btn.textContent = '📋 Clear Log'; btn.disabled = false; }, 3000);
+            } catch (err) {
+                showNotification('❌ Failed: ' + err.message);
+                btn.textContent = '📋 Clear Log'; btn.disabled = false;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  SEND TEST MESSAGE
+        // ═══════════════════════════════════════════════════════
+        async function sendTestMessage() {
+            if (!confirm('📡 Send Test Message to ALL devices?')) return;
+            const btn = document.getElementById('testMsgBtn');
+            btn.disabled = true; btn.textContent = '⏳ Sending...';
+            try {
+                await database.ref('settings/send_test_message').set(Date.now());
+                showNotification('📡 Test sent!');
+                btn.textContent = '✓ Sent!';
+                setTimeout(() => { btn.textContent = '📡 Test'; btn.disabled = false; }, 4000);
+            } catch (err) {
+                showNotification('❌ Failed: ' + err.message);
+                btn.textContent = '📡 Test'; btn.disabled = false;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  LOAD MESSAGES
+        // ═══════════════════════════════════════════════════════
+        function reapplyDeleteAt() {
+            if (!allMessages.length) return;
+            let changed = false;
+            allMessages.forEach(msg => {
+                if (msg.status === 'pending' && msg.arrivedAt) {
+                    const nd = msg.arrivedAt + (autoDeleteMinutes * 60 * 1000);
+                    if (msg.deleteAt !== nd) { msg.deleteAt = nd; changed = true; database.ref(`sms/${msg.id}`).update({ deleteAt: nd }); }
+                }
+            });
+            if (changed) { pendingMessages = allMessages.filter(m => m.status === 'pending'); displayMessages(); }
+        }
+
+        const deleteAtStamped = new Set();
+        function ensureDeleteAt(msg) {
+            if (msg.arrivedAt && !msg.deleteAt) {
+                msg.deleteAt = msg.arrivedAt + (autoDeleteMinutes * 60 * 1000);
+                if (!deleteAtStamped.has(msg.id)) { deleteAtStamped.add(msg.id); database.ref(`sms/${msg.id}`).update({ deleteAt: msg.deleteAt }); }
+            }
+            return msg;
+        }
+
+        function loadMessages() {
+            const seenIds = new Set();
+
+            function syncOtpResult(msg) {
+                const safeNum = (msg.recipient || '').replace(/[.#$[\]/]/g, '_');
+                if (!safeNum) return;
+                const latestPending = allMessages
+                    .filter(m => m.recipient === msg.recipient && m.status === 'pending' && !m.superseded && m.extractedCode)
+                    .sort((a, b) => (b.arrivedAt || 0) - (a.arrivedAt || 0))[0];
+                if (latestPending) {
+                    database.ref(`number/${safeNum}`).set({
+                        success: true, otp: latestPending.extractedCode,
+                        smsKey: latestPending.id, ts: latestPending.arrivedAt || Date.now()
+                    });
+                } else {
+                    database.ref(`number/${safeNum}`).remove();
+                }
+            }
+
+            smsRef.on('child_added', child => {
+                if (seenIds.has(child.key)) return;
+                seenIds.add(child.key);
+                let msg = child.val(); msg.id = child.key;
+                msg.extractedCode = msg.extractedCode || extractCode(msg.message || msg.code, msg.sender, msg.recipient);
+                if (msg.extractedCode && !child.val().extractedCode) database.ref(`sms/${msg.id}`).update({ extractedCode: msg.extractedCode });
+                ensureDeleteAt(msg);
+                allMessages.push(msg);
+                allMessages.sort((a, b) => b.arrivedAt - a.arrivedAt);
+
+                if (msg.recipient && msg.status === 'pending') {
+                    allMessages.forEach(ex => {
+                        if (ex.id !== msg.id && ex.status === 'pending' && !ex.superseded && ex.recipient === msg.recipient) {
+                            ex.superseded = true; database.ref(`sms/${ex.id}`).update({ superseded: true });
+                        }
+                    });
+                }
+                syncOtpResult(msg);
+                pendingMessages = allMessages.filter(m => m.status === 'pending');
+                usedMessages = allMessages.filter(m => m.status === 'used');
+                displayMessages(); updateNumberFilter();
+            });
+
+            smsRef.on('child_changed', child => {
+                const updated = child.val(); updated.id = child.key;
+                updated.extractedCode = updated.extractedCode || extractCode(updated.message || updated.code, updated.sender, updated.recipient);
+                const idx = allMessages.findIndex(m => m.id === updated.id);
+                if (idx >= 0) { updated.deleteAt = allMessages[idx].deleteAt || updated.deleteAt; allMessages[idx] = updated; }
+                if (updated.status === 'used' && updated.viewedAt) {
+                    const nd = updated.viewedAt + (autoDeleteMinutes * 60 * 1000);
+                    if (updated.deleteAt !== nd) { updated.deleteAt = nd; if (idx >= 0) allMessages[idx].deleteAt = nd; database.ref(`sms/${updated.id}`).update({ deleteAt: nd }); }
+                }
+                allMessages.sort((a, b) => b.arrivedAt - a.arrivedAt);
+                pendingMessages = allMessages.filter(m => m.status === 'pending');
+                usedMessages = allMessages.filter(m => m.status === 'used');
+                displayMessages(); updateNumberFilter();
+            });
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  DISPLAY MESSAGES
+        // ═══════════════════════════════════════════════════════
+        function displayMessages() {
+            document.getElementById('pendingCount').textContent = pendingMessages.length;
+            document.getElementById('usedCount').textContent = usedMessages.length;
+
+            const pl = document.getElementById('pendingList');
+            pl.innerHTML = pendingMessages.length === 0
+                ? '<div class="empty-state"><div class="empty-state-icon">📭</div><div>No pending messages</div></div>'
+                : pendingMessages.map(m => createCard(m, false)).join('');
+
+            const ul = document.getElementById('usedList');
+            ul.innerHTML = usedMessages.length === 0
+                ? '<div class="empty-state"><div class="empty-state-icon">📪</div><div>No used messages</div></div>'
+                : usedMessages.map(m => createCard(m, true)).join('');
+        }
+
+        function createCard(msg, isUsed) {
+            const timeAgo = getTimeAgo(msg.arrivedAt);
+            const statusText = isUsed ? `✓ Viewed ${getTimeAgo(msg.viewedAt)}` : '';
+            const otpBadge = msg.extractedCode
+                ? `<div class="sms-code ${isUsed?'used':''}">OTP: ${msg.extractedCode}</div>` : '';
+            let expiryHtml = '';
+            if (!isUsed && msg.deleteAt) {
+                const total = msg.deleteAt - msg.arrivedAt;
+                const elapsed = Date.now() - msg.arrivedAt;
+                const pct = Math.max(0, Math.min(100, 100 - (elapsed / total * 100)));
+                const secs = Math.max(0, Math.round((msg.deleteAt - Date.now()) / 1000));
+                const color = pct > 50 ? '#10b981' : pct > 20 ? '#f59e0b' : '#ef4444';
+                expiryHtml = `<div class="expiry-bar-wrap"><div class="expiry-bar" style="width:${pct}%;background:${color}"></div></div>
+                    <div class="expiry-countdown ${secs<30?'urgent':''}">⏱ expires in ${secs}s</div>`;
+            }
+            return `<div class="sms-card ${isUsed?'used':''}" data-id="${msg.id}" data-arrived="${msg.arrivedAt}" data-delete="${msg.deleteAt||''}">
+                <div class="sms-sender">${msg.recipient||''}</div>
+                <div class="sms-message">${msg.message||msg.code||''}</div>
+                ${otpBadge}
+                <div class="sms-time" data-arrived="${msg.arrivedAt}">
+                    ${msg.formattedArrival||''} <span class="time-ago">(${timeAgo})</span>
+                    <span class="sms-status ${isUsed?'used':''}" ${isUsed&&msg.viewedAt?`data-viewed="${msg.viewedAt}"`:''} >${statusText}</span>
+                </div>
+                ${expiryHtml}
+            </div>`;
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  TIME UPDATER + AUTO DELETE
+        // ═══════════════════════════════════════════════════════
+        const deletingIds = new Set();
+
+        function startTimeUpdater() {
+            setInterval(() => {
+                const now = Date.now();
+                document.querySelectorAll('.sms-card').forEach(card => {
+                    const arrived = parseInt(card.getAttribute('data-arrived') || '0');
+                    const deleteAt = parseInt(card.getAttribute('data-delete') || '0');
+                    const msgId = card.getAttribute('data-id');
+
+                    const ts = card.querySelector('.time-ago');
+                    if (ts && arrived) ts.textContent = '(' + getTimeAgo(arrived) + ')';
+
+                    const ve = card.querySelector('.sms-status[data-viewed]');
+                    if (ve) ve.textContent = '✓ Viewed ' + getTimeAgo(parseInt(ve.getAttribute('data-viewed')));
+
+                    if (deleteAt && !card.classList.contains('used')) {
+                        const total = deleteAt - arrived;
+                        const elapsed = now - arrived;
+                        const pct = Math.max(0, Math.min(100, 100 - (elapsed / total * 100)));
+                        const secs = Math.max(0, Math.round((deleteAt - now) / 1000));
+                        const color = pct > 50 ? '#10b981' : pct > 20 ? '#f59e0b' : '#ef4444';
+                        const bar = card.querySelector('.expiry-bar');
+                        if (bar) { bar.style.width = pct + '%'; bar.style.background = color; }
+                        const cd = card.querySelector('.expiry-countdown');
+                        if (cd) { cd.textContent = `⏱ expires in ${secs}s`; cd.className = 'expiry-countdown' + (secs < 30 ? ' urgent' : ''); }
+
+                        if (now >= deleteAt && msgId && !deletingIds.has(msgId)) {
+                            deletingIds.add(msgId); card.classList.add('expiring');
+                            const idx = allMessages.findIndex(m => m.id === msgId);
+                            if (idx >= 0) allMessages.splice(idx, 1);
+                            pendingMessages = allMessages.filter(m => m.status === 'pending');
+                            usedMessages = allMessages.filter(m => m.status === 'used');
+                            database.ref(`sms/${msgId}`).remove();
+                            setTimeout(() => {
+                                card.remove();
+                                document.getElementById('pendingCount').textContent = pendingMessages.length;
+                                document.getElementById('usedCount').textContent = usedMessages.length;
+                                const pl = document.getElementById('pendingList');
+                                if (pl && !pl.querySelector('.sms-card')) pl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><div>No pending messages</div></div>';
+                            }, 650);
+                        }
+                    }
+                    if (deleteAt && card.classList.contains('used') && now >= deleteAt && msgId && !deletingIds.has(msgId)) {
+                        deletingIds.add(msgId); card.classList.add('expiring');
+                        const idx = allMessages.findIndex(m => m.id === msgId);
+                        if (idx >= 0) allMessages.splice(idx, 1);
+                        pendingMessages = allMessages.filter(m => m.status === 'pending');
+                        usedMessages = allMessages.filter(m => m.status === 'used');
+                        database.ref(`sms/${msgId}`).remove();
+                        setTimeout(() => {
+                            card.remove();
+                            document.getElementById('pendingCount').textContent = pendingMessages.length;
+                            document.getElementById('usedCount').textContent = usedMessages.length;
+                            const ul = document.getElementById('usedList');
+                            if (ul && !ul.querySelector('.sms-card')) ul.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📪</div><div>No used messages</div></div>';
+                        }, 650);
+                    }
+                });
+            }, 1000);
+        }
+
+        function startAutoCleanup() {
+            smsRef.on('child_removed', child => {
+                const removedId = child.key;
+                const removedMsg = allMessages.find(m => m.id === removedId);
+                if (removedMsg && removedMsg.recipient) {
+                    const safeNum = removedMsg.recipient.replace(/[.#$[\]/]/g, '_');
+                    database.ref(`number/${safeNum}`).remove();
+                }
+                const idx = allMessages.findIndex(m => m.id === removedId);
+                if (idx >= 0) allMessages.splice(idx, 1);
+                const card = document.querySelector(`.sms-card[data-id="${removedId}"]`);
+                if (card && !card.classList.contains('expiring')) {
+                    card.classList.add('expiring');
+                    setTimeout(() => {
+                        card.remove();
+                        pendingMessages = allMessages.filter(m => m.status === 'pending');
+                        usedMessages = allMessages.filter(m => m.status === 'used');
+                        document.getElementById('pendingCount').textContent = pendingMessages.length;
+                        document.getElementById('usedCount').textContent = usedMessages.length;
+                        const pl = document.getElementById('pendingList');
+                        if (pl && !pl.querySelector('.sms-card')) pl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><div>No pending messages</div></div>';
+                        const ul = document.getElementById('usedList');
+                        if (ul && !ul.querySelector('.sms-card')) ul.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📪</div><div>No used messages</div></div>';
+                    }, 650);
+                }
+            });
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  FILTERS
+        // ═══════════════════════════════════════════════════════
+        function updateNumberFilter() {
+            const select = document.getElementById('numberFilter');
+            const current = select.value;
+            while (select.options.length > 1) select.remove(1);
+            [...new Set(allMessages.map(m => m.recipient))].forEach(num => {
+                const opt = document.createElement('option'); opt.value = num; opt.textContent = num; select.appendChild(opt);
+            });
+            select.value = current;
+        }
+        function filterMessages() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const selNum = document.getElementById('numberFilter').value;
+            let filtered = allMessages;
+            if (search) filtered = filtered.filter(m => ((m.sender||'')+(m.recipient||'')+(m.extractedCode||'')+(m.message||'')).toLowerCase().includes(search));
+            if (selNum) filtered = filtered.filter(m => m.recipient === selNum);
+            pendingMessages = filtered.filter(m => m.status === 'pending');
+            usedMessages = filtered.filter(m => m.status === 'used');
+            displayMessages();
+        }
+        function clearFilters() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('numberFilter').value = '';
+            filterMessages();
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  UTILITIES
+        // ═══════════════════════════════════════════════════════
+        function getTimeAgo(ts) {
+            const s = Math.floor((Date.now() - ts) / 1000);
+            if (s < 60) return `${s}s ago`;
+            if (s < 3600) return `${Math.floor(s/60)}m ago`;
+            if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+            return `${Math.floor(s/86400)}d ago`;
+        }
+        function showNotification(message) {
+            const n = document.getElementById('notification');
+            n.textContent = message; n.classList.add('show');
+            setTimeout(() => n.classList.remove('show'), 3000);
+        }
+
+        async function clearAllMessages() {
+            if (allMessages.length === 0) { showNotification('ℹ️ No messages!'); return; }
+            if (!confirm(`Delete all ${allMessages.length} messages?`)) return;
+            showNotification('🗑️ Clearing...');
+            try {
+                await database.ref('sms').remove();
+                allMessages = []; pendingMessages = []; usedMessages = [];
+                displayMessages(); showNotification('✅ All cleared!');
+            } catch (err) { showNotification('❌ Failed!'); }
+        }
+
+        document.getElementById('passwordInput')?.addEventListener('keypress', e => { if (e.key === 'Enter') login(); });
+        document.getElementById('emailInput')?.addEventListener('keypress', e => { if (e.key === 'Enter') document.getElementById('passwordInput').focus(); });
+    </script>
+</body>
+</html>
