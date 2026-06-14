@@ -182,8 +182,15 @@
     // ═══════════════════════════════════════════════════════════
     window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('passwordInput').addEventListener('keyup', e => { if (e.key === 'Enter') doLogin(); });
-        if (token) tryConnect();
-        else showLogin();
+        // Auto-login: try stored credentials first
+        const savedPw = sessionStorage.getItem('getotp_pw');
+        if (savedPw) {
+            autoLogin(savedPw);
+        } else if (token) {
+            tryConnect();
+        } else {
+            showLogin();
+        }
     });
 
     function showLogin() {
@@ -197,29 +204,48 @@
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  AUTH
+    //  AUTH — survives page reloads AND server restarts
     // ═══════════════════════════════════════════════════════════
     async function doLogin() {
         const pw = document.getElementById('passwordInput').value.trim();
         if (!pw) return;
+        const ok = await loginWithPassword(pw);
+        if (ok) {
+            document.getElementById('loginError').textContent = '';
+        } else {
+            document.getElementById('loginError').textContent = 'Wrong password';
+        }
+    }
+
+    async function autoLogin(pw) {
+        const ok = await loginWithPassword(pw);
+        if (!ok) {
+            sessionStorage.removeItem('getotp_pw');
+            showLogin();
+        }
+    }
+
+    async function loginWithPassword(pw) {
         try {
             const res = await fetch('/api/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password: pw })
             });
+            if (!res.ok) return false;
             const data = await res.json();
-            if (!res.ok) { document.getElementById('loginError').textContent = data.error || 'Login failed'; return; }
             token = data.token;
             localStorage.setItem('getotp_token', token);
-            document.getElementById('loginError').textContent = '';
+            sessionStorage.setItem('getotp_pw', pw);  // survives reloads
             tryConnect();
-        } catch (e) { document.getElementById('loginError').textContent = 'Connection failed'; }
+            return true;
+        } catch (e) { return false; }
     }
 
     function doLogout() {
         token = '';
         localStorage.removeItem('getotp_token');
+        sessionStorage.removeItem('getotp_pw');
         if (eventSource) { eventSource.close(); eventSource = null; }
         allMessages = {};
         showLogin();
@@ -232,15 +258,18 @@
     // ═══════════════════════════════════════════════════════════
     async function tryConnect() {
         try {
-            // Verify token by fetching messages
             const res = await fetch('/api/messages', { headers: authHeaders() });
-            if (res.status === 401) { doLogout(); return; }
+            if (res.status === 401) {
+                // Token invalid (server restarted?) — try auto-login
+                const pw = sessionStorage.getItem('getotp_pw');
+                if (pw) { autoLogin(pw); return; }
+                doLogout(); return;
+            }
             const data = await res.json();
             allMessages = {};
             (data.messages || []).forEach(m => { allMessages[m.id] = m; });
             renderAll();
 
-            // Fetch full settings
             const sRes = await fetch('/api/full-settings', { headers: authHeaders() });
             if (sRes.ok) {
                 const s = await sRes.json();
@@ -252,12 +281,20 @@
 
             showDashboard();
             connectSSE();
-        } catch (e) { showLogin(); }
+        } catch (e) {
+            // Network error — retry in 3 seconds
+            setTimeout(() => {
+                const pw = sessionStorage.getItem('getotp_pw');
+                if (pw) autoLogin(pw); else showLogin();
+            }, 3000);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  SSE — real-time events from server
+    //  SSE — real-time events from server (auto-reconnect)
     // ═══════════════════════════════════════════════════════════
+    let sseRetryCount = 0;
+
     function connectSSE() {
         if (eventSource) eventSource.close();
         eventSource = new EventSource('/api/stream?token=' + token);
@@ -291,10 +328,24 @@
             if (d.key === 'filters') configFilters = d.value;
         });
 
-        eventSource.onopen = () => setConnectionStatus(true);
+        eventSource.onopen = () => {
+            sseRetryCount = 0;
+            setConnectionStatus(true);
+        };
+
         eventSource.onerror = () => {
             setConnectionStatus(false);
-            // EventSource auto-reconnects
+            sseRetryCount++;
+            // If SSE fails repeatedly, token might be invalid — re-login
+            if (sseRetryCount >= 3) {
+                sseRetryCount = 0;
+                eventSource.close();
+                eventSource = null;
+                const pw = sessionStorage.getItem('getotp_pw');
+                if (pw) {
+                    setTimeout(() => autoLogin(pw), 2000);
+                }
+            }
         };
     }
 
