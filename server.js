@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.0 (Self-Contained)
+ * server.js — GetOTP Render Server v4.5
  *
  * ZERO external dependencies. No Firebase, no Google Sheets, no Cloudflare.
  * Everything runs in-memory on this single Render service.
@@ -182,7 +182,7 @@ app.get('/health', (req, res) => {
 // ─── Start server ───────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`[server] GetOTP Render v4.0 (self-contained) on port ${PORT}`);
+    console.log(`[server] GetOTP Render v4.5 on port ${PORT}`);
     console.log(`[server] POST /sms           — receive SMS`);
     console.log(`[server] GET  /get           — OTP fetch`);
     console.log(`[server] GET  /api/settings  — app polling`);
