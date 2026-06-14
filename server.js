@@ -25,6 +25,10 @@
 const express = require('express');
 const path    = require('path');
 const store   = require('./lib/store');
+const fcm     = require('./lib/fcm');
+
+// Initialize FCM (silent no-op if FIREBASE_SERVICE_ACCOUNT not set)
+fcm.init();
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -119,18 +123,22 @@ app.post('/api/toggle', requireToken, (req, res) => {
     const { enabled } = req.body || {};
     if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be boolean' });
     store.setGlobalForwarding(enabled);
+    // FCM: instantly wake the app (even if killed)
+    fcm.send(enabled ? 'enable' : 'disable');
     res.json({ success: true, globalForwarding: enabled });
 });
 
 // Clear forward log on devices
 app.post('/api/clear-log', requireToken, (req, res) => {
     store.triggerClearLog();
+    fcm.send('clear_log');
     res.json({ success: true });
 });
 
 // Send test message to devices
 app.post('/api/test', requireToken, (req, res) => {
     store.triggerTestMessage();
+    fcm.send('test');
     res.json({ success: true });
 });
 

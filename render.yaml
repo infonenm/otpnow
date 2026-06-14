@@ -9,6 +9,8 @@ services:
         sync: false
       - key: API_KEY
         generateValue: true
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
       - key: OTP_PATTERNS
         value: "(\\d{4,8})"
       - key: AUTO_DELETE_MINUTES
