@@ -122,23 +122,25 @@ app.get('/api/stream', requireToken, (req, res) => {
 app.post('/api/toggle', requireToken, (req, res) => {
     const { enabled } = req.body || {};
     if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be boolean' });
+    const ts = Date.now();
     store.setGlobalForwarding(enabled);
-    // FCM: instantly wake the app (even if killed)
-    fcm.send(enabled ? 'enable' : 'disable');
+    fcm.send(enabled ? 'enable' : 'disable', ts);
     res.json({ success: true, globalForwarding: enabled });
 });
 
 // Clear forward log on devices
 app.post('/api/clear-log', requireToken, (req, res) => {
-    store.triggerClearLog();
-    fcm.send('clear_log');
+    const ts = Date.now();          // single timestamp for both paths
+    store.triggerClearLog(ts);
+    fcm.send('clear_log', ts);
     res.json({ success: true });
 });
 
 // Send test message to devices
 app.post('/api/test', requireToken, (req, res) => {
-    store.triggerTestMessage();
-    fcm.send('test');
+    const ts = Date.now();          // single timestamp for both paths
+    store.triggerTestMessage(ts);
+    fcm.send('test', ts);
     res.json({ success: true });
 });
 
