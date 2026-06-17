@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GetOTP Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep:#080d18;--bg-panel:#0d1526;--bg-card:#111b2e;--bg-card-h:#172035;
+            --border:rgba(255,255,255,0.07);--border-h:rgba(255,255,255,0.14);
+            --teal:#00d4aa;--teal-dim:rgba(0,212,170,0.12);--teal-glow:rgba(0,212,170,0.25);
+            --amber:#f59e0b;--amber-dim:rgba(245,158,11,0.14);
+            --red:#f87171;--red-dim:rgba(248,113,113,0.14);
+            --blue:#60a5fa;--blue-dim:rgba(96,165,250,0.12);
+            --text-1:#e2e8f0;--text-2:#94a3b8;--text-3:#475569;
+            --mono:'JetBrains Mono',monospace;--sans:'DM Sans',sans-serif;
+            --radius:12px;--radius-lg:18px;
+        }
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:var(--sans);background-color:var(--bg-deep);background-image:radial-gradient(ellipse 80% 50% at 20% -10%,rgba(0,212,170,0.08) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 110%,rgba(96,165,250,0.07) 0%,transparent 55%);min-height:100vh;color:var(--text-1)}
+        .login-container{display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}
+        .login-box{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-lg);padding:48px 40px 40px;width:100%;max-width:380px;box-shadow:0 32px 80px rgba(0,0,0,0.6),0 0 0 1px rgba(0,212,170,0.06)}
+        .login-box h2{text-align:center;margin-bottom:32px;font-size:22px;font-weight:600;letter-spacing:-0.3px}.login-box h2 span{color:var(--teal)}
+        .login-box input{width:100%;padding:13px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);font-family:var(--sans);font-size:15px;margin-bottom:12px;outline:none;transition:border-color .2s,box-shadow .2s}
+        .login-box input:focus{border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-glow)}.login-box input::placeholder{color:var(--text-3)}
+        .login-box button{width:100%;margin-top:8px;padding:14px;background:var(--teal);border:none;border-radius:var(--radius);color:#021a15;font-family:var(--sans);font-size:15px;font-weight:700;cursor:pointer;transition:opacity .2s,transform .15s}
+        .login-box button:hover{opacity:0.9;transform:translateY(-1px)}.error{color:var(--red);text-align:center;margin-top:12px;font-size:13px}
+        .dashboard{display:none;min-height:100vh;padding:16px 20px 28px}.dashboard.active{display:block}
+        .top-bar{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+        .logo{font-size:15px;font-weight:700;letter-spacing:-0.2px;color:var(--teal);display:flex;align-items:center;gap:8px;margin-right:8px;white-space:nowrap}.logo-icon{font-size:17px}
+        .status-indicator{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+        .live-indicator{display:inline-flex;align-items:center;gap:6px;background:var(--teal-dim);border:1px solid rgba(0,212,170,0.2);padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;color:var(--teal);letter-spacing:0.3px}
+        .live-dot{width:6px;height:6px;background:var(--teal);border-radius:50%;animation:pulse 2s ease-in-out infinite}
+        .connection-status{padding:5px 12px;border-radius:20px;font-size:12px;font-weight:500;background:rgba(255,255,255,0.06);color:var(--text-2)}
+        .connection-status.connected{background:var(--teal-dim);color:var(--teal);border:1px solid rgba(0,212,170,0.2)}
+        .connection-status.disconnected{background:var(--red-dim);color:var(--red);border:1px solid rgba(248,113,113,0.2)}
+        .search-bar{display:flex;gap:8px;flex:1;min-width:220px;max-width:480px}
+        .search-bar input{flex:1;padding:9px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);font-family:var(--sans);font-size:13px;outline:none}
+        .search-bar input:focus{border-color:var(--teal)}.search-bar input::placeholder{color:var(--text-3)}
+        .filter-dropdown{padding:9px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);font-family:var(--sans);font-size:13px;cursor:pointer;outline:none}
+        .tb-btn{padding:8px 14px;border-radius:var(--radius);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;white-space:nowrap;border:1px solid transparent}.tb-btn:hover{transform:translateY(-1px)}
+        .clear-btn{padding:9px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-2);font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;transition:all .18s}.clear-btn:hover{border-color:var(--border-h);color:var(--text-1)}
+        .config-btn{padding:8px 14px;background:var(--blue-dim);border:1px solid rgba(96,165,250,0.25);border-radius:var(--radius);color:var(--blue);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;white-space:nowrap}.config-btn:hover{background:rgba(96,165,250,0.2);transform:translateY(-1px)}
+        .forward-toggle-btn{padding:8px 18px;border-radius:var(--radius);font-family:var(--sans);font-size:13px;font-weight:700;cursor:pointer;transition:all .22s;min-width:160px;text-align:center;border:1px solid transparent;letter-spacing:0.2px}
+        .forward-toggle-btn.enabled{background:rgba(0,212,170,0.15);border-color:rgba(0,212,170,0.35);color:var(--teal);box-shadow:0 0 18px rgba(0,212,170,0.18)}
+        .forward-toggle-btn.disabled{background:var(--red-dim);border-color:rgba(248,113,113,0.35);color:var(--red);box-shadow:0 0 14px rgba(248,113,113,0.15)}
+        .forward-toggle-btn:hover{transform:translateY(-1px)}.forward-toggle-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+        .clear-log-btn{padding:8px 14px;background:var(--blue-dim);border:1px solid rgba(96,165,250,0.2);border-radius:var(--radius);color:var(--blue);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;white-space:nowrap}
+        .clear-log-btn:hover{background:rgba(96,165,250,0.2);transform:translateY(-1px)}.clear-log-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none}
+        .test-msg-btn{padding:8px 16px;background:rgba(167,139,250,0.18);border:1px solid rgba(167,139,250,0.4);color:#c4b5fd;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
+        .test-msg-btn:hover{background:rgba(167,139,250,0.35);border-color:#a78bfa;color:#fff;transform:translateY(-1px)}.test-msg-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none}
+        .clear-all-btn{padding:8px 14px;background:var(--red-dim);border:1px solid rgba(248,113,113,0.3);border-radius:var(--radius);color:var(--red);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;white-space:nowrap}.clear-all-btn:hover{background:rgba(248,113,113,0.22);transform:translateY(-1px)}
+        .logout-btn{padding:8px 14px;background:transparent;border:1px solid var(--border);border-radius:var(--radius);color:var(--text-2);font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;transition:all .18s}.logout-btn:hover{border-color:var(--red);color:var(--red)}
+        @keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 var(--teal-glow)}50%{opacity:.6;box-shadow:0 0 0 4px transparent}}
+        .grid-container{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:1600px;margin:0 auto}@media(max-width:1024px){.grid-container{grid-template-columns:1fr}}
+        .section{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;min-height:400px}
+        .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+        .section-title{font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;display:flex;align-items:center;gap:10px;color:var(--text-2)}
+        .count-badge{background:rgba(255,255,255,0.08);border:1px solid var(--border);padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;font-family:var(--mono);color:var(--text-1);letter-spacing:0;text-transform:none}
+        .sms-list{display:flex;flex-direction:column;gap:10px}
+        @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        .sms-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;transition:background .2s,border-color .2s,box-shadow .2s;animation:slideIn .28s ease-out both;position:relative;overflow:hidden}
+        .sms-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--teal);border-radius:3px 0 0 3px;opacity:0.7}
+        .sms-card.used::before{background:var(--amber);opacity:0.5}.sms-card:hover{background:var(--bg-card-h);border-color:var(--border-h);box-shadow:0 4px 20px rgba(0,0,0,0.3)}.sms-card.used{opacity:0.68}
+        .sms-sender{font-size:12px;font-weight:600;color:var(--teal);margin-bottom:7px;letter-spacing:0.2px}.sms-card.used .sms-sender{color:var(--amber)}
+        .sms-message{color:var(--text-2);font-size:13px;line-height:1.55;margin-bottom:11px}
+        .sms-code{display:inline-flex;align-items:center;gap:8px;background:rgba(0,212,170,0.12);border:1px solid rgba(0,212,170,0.28);color:var(--teal);padding:6px 14px;border-radius:8px;font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:2.5px;margin-bottom:9px}
+        .sms-code.used{background:var(--amber-dim);border-color:rgba(245,158,11,0.28);color:var(--amber)}
+        .sms-time{color:var(--text-3);font-size:11px;font-family:var(--mono);letter-spacing:0.2px}
+        .sms-status{display:inline-block;color:var(--teal);font-size:11px;margin-left:10px;font-family:var(--sans)}.sms-status.used{color:var(--amber)}
+        .empty-state{text-align:center;padding:60px 20px;color:var(--text-3)}.empty-state-icon{font-size:42px;margin-bottom:12px;opacity:0.6}.empty-state div:last-child{font-size:13px;letter-spacing:0.2px}
+        .expiry-bar-wrap{height:2px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:10px;overflow:hidden}
+        .expiry-bar{height:100%;border-radius:2px;transition:width 1s linear,background 1s}
+        .expiry-countdown{font-size:10px;font-family:var(--mono);color:var(--text-3);margin-top:4px;letter-spacing:0.3px}.expiry-countdown.urgent{color:var(--red)}
+        @keyframes fadeOut{from{opacity:1;transform:scaleY(1);max-height:300px}to{opacity:0;transform:scaleY(0);max-height:0;padding:0;margin:0}}.sms-card.expiring{animation:fadeOut .6s ease forwards;transform-origin:top;overflow:hidden}
+        .notification{position:fixed;top:20px;right:20px;background:var(--bg-panel);border:1px solid var(--border-h);color:var(--text-1);padding:13px 20px;border-radius:var(--radius);box-shadow:0 16px 40px rgba(0,0,0,0.5);transform:translateY(-12px) translateX(20px);opacity:0;transition:all .28s cubic-bezier(0.34,1.56,0.64,1);z-index:1000;font-size:14px;font-weight:500;max-width:340px}.notification.show{transform:translateY(0) translateX(0);opacity:1}
+        .config-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:900;justify-content:center;align-items:flex-start;padding:40px 20px;overflow-y:auto}.config-overlay.open{display:flex}
+        .config-modal{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-lg);width:100%;max-width:700px;padding:28px 32px;position:relative;box-shadow:0 32px 80px rgba(0,0,0,0.6)}
+        .config-modal h3{font-size:18px;font-weight:700;color:var(--teal);margin-bottom:24px;display:flex;justify-content:space-between;align-items:center}
+        .config-close{background:none;border:none;color:var(--text-3);font-size:22px;cursor:pointer;padding:4px 8px}.config-close:hover{color:var(--text-1)}
+        .config-section{margin-bottom:24px}.config-section h4{font-size:13px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+        .config-row{display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;font-size:13px}
+        .config-row .pattern-text{flex:1;font-family:var(--mono);font-size:12px;color:var(--text-2);word-break:break-all}.config-row .phone-label{font-weight:600;color:var(--teal);min-width:120px;font-size:12px}
+        .config-row .del-btn{background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:2px 6px;border-radius:4px;transition:background .15s}.config-row .del-btn:hover{background:var(--red-dim)}
+        .config-add{display:flex;gap:8px;margin-top:8px}
+        .config-add input{flex:1;padding:9px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-family:var(--mono);font-size:12px;outline:none}
+        .config-add input:focus{border-color:var(--teal)}.config-add input::placeholder{color:var(--text-3)}
+        .config-add button{padding:9px 16px;background:var(--teal-dim);border:1px solid rgba(0,212,170,0.3);border-radius:8px;color:var(--teal);font-weight:600;font-size:12px;cursor:pointer;transition:all .15s;white-space:nowrap}.config-add button:hover{background:rgba(0,212,170,0.2)}
+        .setting-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}.setting-row label{font-size:13px;color:var(--text-2);min-width:160px}
+        .setting-row input[type=number]{width:80px;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-family:var(--mono);font-size:13px;outline:none}.setting-row input:focus{border-color:var(--teal)}
+        .save-config-btn{padding:12px 24px;background:var(--teal);border:none;border-radius:var(--radius);color:#021a15;font-weight:700;font-size:14px;cursor:pointer;transition:all .15s;margin-top:8px}.save-config-btn:hover{opacity:0.9;transform:translateY(-1px)}
+    </style>
+</head>
+<body>
+    <!-- LOGIN -->
+    <div id="loginScreen" class="login-container">
+        <div class="login-box">
+            <h2><span>GetOTP</span> Dashboard</h2>
+            <input type="password" id="passwordInput" placeholder="Dashboard password" autocomplete="current-password">
+            <button onclick="doLogin()">Login</button>
+            <div id="loginError" class="error"></div>
+        </div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="dashboard" class="dashboard">
+        <div class="top-bar">
+            <div class="logo"><span class="logo-icon">📱</span> GetOTP</div>
+            <div class="status-indicator">
+                <div class="live-indicator"><div class="live-dot"></div> Live</div>
+                <div id="connectionStatus" class="connection-status">Connecting...</div>
+                <button class="config-btn" onclick="openConfig()">⚙️ Filters & Settings</button>
+                <button id="forwardToggleBtn" class="forward-toggle-btn disabled" onclick="toggleForwarding()" disabled>⏳ Loading...</button>
+            </div>
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="🔍 Filter by number..." oninput="filterMessages()">
+                <select class="filter-dropdown" id="numberFilter" onchange="filterMessages()">
+                    <option value="">All Numbers</option>
+                </select>
+                <button class="clear-btn" onclick="clearFilters()">Clear</button>
+            </div>
+            <button class="clear-all-btn" onclick="clearAllMessages()">🗑️ Clear All</button>
+            <button class="clear-log-btn" id="clearLogBtn" onclick="clearForwardLog()">📋 Clear Log</button>
+            <button class="test-msg-btn" id="testMsgBtn" onclick="sendTestMessage()">📡 Test</button>
+            <button class="logout-btn" onclick="doLogout()">Logout</button>
+        </div>
+        <div class="grid-container">
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Pending <span class="count-badge" id="pendingCount">0</span></div>
+                </div>
+                <div class="sms-list" id="pendingList">
+                    <div class="empty-state"><div class="empty-state-icon">📭</div><div>No pending messages</div></div>
+                </div>
+            </div>
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Used <span class="count-badge" id="usedCount">0</span></div>
+                </div>
+                <div class="sms-list" id="usedList">
+                    <div class="empty-state"><div class="empty-state-icon">📪</div><div>No used messages</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONFIG MODAL -->
+    <div id="configOverlay" class="config-overlay" onclick="if(event.target===this)closeConfig()">
+        <div class="config-modal">
+            <h3>⚙️ Filters & Settings <button class="config-close" onclick="closeConfig()">✕</button></h3>
+            <div class="config-section"><h4>Default OTP Patterns</h4><div id="defaultPatternsList"></div>
+                <div class="config-add"><input id="newDefaultPattern" placeholder='Regex e.g. (\d{4,8})'><button onclick="addDefaultPattern()">+ Add</button></div>
+            </div>
+            <div class="config-section"><h4>Number-Specific Rules</h4><div id="numberRulesList"></div>
+                <div class="config-add"><input id="newRulePhone" placeholder="Phone / sender" style="max-width:140px"><input id="newRulePattern" placeholder="Pattern"><button onclick="addNumberRule()">+ Add</button></div>
+            </div>
+            <div class="config-section"><h4>Settings</h4>
+                <div class="setting-row"><label>Auto-delete (minutes)</label><input type="number" id="cfgAutoDelete" min="1" max="1440" value="30"></div>
+            </div>
+            <button class="save-config-btn" onclick="saveConfig()">💾 Save All Changes</button>
+        </div>
+    </div>
+    <div id="notification" class="notification"></div>
+
+    <script>
+    // ═══════════════════════════════════════════════════════════
+    //  STATE
+    // ═══════════════════════════════════════════════════════════
+    let token = localStorage.getItem('getotp_token') || '';
+    let allMessages = {};          // id → smsObject
+    let globalForwarding = true;
+    let eventSource = null;
+    let configFilters = [];
+    let autoDeleteMinutes = 30;
+    let expiryTimer = null;
+
+    // ═══════════════════════════════════════════════════════════
+    //  INIT
+    // ═══════════════════════════════════════════════════════════
+    window.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('passwordInput').addEventListener('keyup', e => { if (e.key === 'Enter') doLogin(); });
+        // Auto-login: try stored credentials first
+        const savedPw = sessionStorage.getItem('getotp_pw');
+        if (savedPw) {
+            autoLogin(savedPw);
+        } else if (token) {
+            tryConnect();
+        } else {
+            showLogin();
+        }
+    });
+
+    function showLogin() {
+        document.getElementById('loginScreen').style.display = 'flex';
+        document.getElementById('dashboard').classList.remove('active');
+    }
+
+    function showDashboard() {
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('dashboard').classList.add('active');
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  AUTH — survives page reloads AND server restarts
+    // ═══════════════════════════════════════════════════════════
+    async function doLogin() {
+        const pw = document.getElementById('passwordInput').value.trim();
+        if (!pw) return;
+        const ok = await loginWithPassword(pw);
+        if (ok) {
+            document.getElementById('loginError').textContent = '';
+        } else {
+            document.getElementById('loginError').textContent = 'Wrong password';
+        }
+    }
+
+    async function autoLogin(pw) {
+        const ok = await loginWithPassword(pw);
+        if (!ok) {
+            sessionStorage.removeItem('getotp_pw');
+            showLogin();
+        }
+    }
+
+    async function loginWithPassword(pw) {
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pw })
+            });
+            if (!res.ok) return false;
+            const data = await res.json();
+            token = data.token;
+            localStorage.setItem('getotp_token', token);
+            sessionStorage.setItem('getotp_pw', pw);  // survives reloads
+            tryConnect();
+            return true;
+        } catch (e) { return false; }
+    }
+
+    function doLogout() {
+        token = '';
+        localStorage.removeItem('getotp_token');
+        sessionStorage.removeItem('getotp_pw');
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        allMessages = {};
+        showLogin();
+    }
+
+    function authHeaders() { return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }; }
+
+    // ═══════════════════════════════════════════════════════════
+    //  CONNECT — fetch initial data + start SSE
+    // ═══════════════════════════════════════════════════════════
+    async function tryConnect() {
+        try {
+            const res = await fetch('/api/messages', { headers: authHeaders() });
+            if (res.status === 401) {
+                // Token invalid (server restarted?) — try auto-login
+                const pw = sessionStorage.getItem('getotp_pw');
+                if (pw) { autoLogin(pw); return; }
+                doLogout(); return;
+            }
+            const data = await res.json();
+            allMessages = {};
+            (data.messages || []).forEach(m => { allMessages[m.id] = m; });
+            renderAll();
+
+            const sRes = await fetch('/api/full-settings', { headers: authHeaders() });
+            if (sRes.ok) {
+                const s = await sRes.json();
+                globalForwarding = s.globalForwarding;
+                configFilters = s.filters || [];
+                autoDeleteMinutes = s.autoDeleteMinutes || 30;
+                updateToggleBtn();
+            }
+
+            showDashboard();
+            connectSSE();
+        } catch (e) {
+            // Network error — retry in 3 seconds
+            setTimeout(() => {
+                const pw = sessionStorage.getItem('getotp_pw');
+                if (pw) autoLogin(pw); else showLogin();
+            }, 3000);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SSE — real-time events from server (auto-reconnect)
+    // ═══════════════════════════════════════════════════════════
+    let sseRetryCount = 0;
+
+    function connectSSE() {
+        if (eventSource) eventSource.close();
+        eventSource = new EventSource('/api/stream?token=' + token);
+
+        eventSource.addEventListener('sms_new', e => {
+            const sms = JSON.parse(e.data);
+            allMessages[sms.id] = sms;
+            renderAll();
+            notify('📩 SMS from ' + sms.sender);
+        });
+
+        eventSource.addEventListener('sms_update', e => {
+            const sms = JSON.parse(e.data);
+            allMessages[sms.id] = sms;
+            renderAll();
+        });
+
+        eventSource.addEventListener('sms_delete', e => {
+            const d = JSON.parse(e.data);
+            const card = document.querySelector(`[data-id="${d.id}"]`);
+            if (card) { card.classList.add('expiring'); setTimeout(() => { delete allMessages[d.id]; renderAll(); }, 600); }
+            else { delete allMessages[d.id]; renderAll(); }
+        });
+
+        eventSource.addEventListener('clear_all', () => { allMessages = {}; renderAll(); notify('🗑️ All messages cleared'); });
+
+        eventSource.addEventListener('settings_change', e => {
+            const d = JSON.parse(e.data);
+            if (d.key === 'globalForwarding') { globalForwarding = d.value; updateToggleBtn(); }
+            if (d.key === 'autoDeleteMinutes') autoDeleteMinutes = d.value;
+            if (d.key === 'filters') configFilters = d.value;
+        });
+
+        eventSource.onopen = () => {
+            sseRetryCount = 0;
+            setConnectionStatus(true);
+        };
+
+        eventSource.onerror = () => {
+            setConnectionStatus(false);
+            sseRetryCount++;
+            // If SSE fails repeatedly, token might be invalid — re-login
+            if (sseRetryCount >= 3) {
+                sseRetryCount = 0;
+                eventSource.close();
+                eventSource = null;
+                const pw = sessionStorage.getItem('getotp_pw');
+                if (pw) {
+                    setTimeout(() => autoLogin(pw), 2000);
+                }
+            }
+        };
+    }
+
+    function setConnectionStatus(connected) {
+        const el = document.getElementById('connectionStatus');
+        el.textContent = connected ? '✓ Connected' : '✗ Disconnected';
+        el.className = 'connection-status ' + (connected ? 'connected' : 'disconnected');
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  RENDER
+    // ═══════════════════════════════════════════════════════════
+    function renderAll() {
+        const searchVal = (document.getElementById('searchInput').value || '').toLowerCase();
+        const filterVal = document.getElementById('numberFilter').value;
+        const pending = [], used = [];
+        const numbers = new Set();
+
+        for (const sms of Object.values(allMessages)) {
+            numbers.add(sms.recipient);
+            if (filterVal && sms.recipient !== filterVal) continue;
+            if (searchVal && !sms.recipient.toLowerCase().includes(searchVal) && !sms.sender.toLowerCase().includes(searchVal)) continue;
+            (sms.status === 'used' ? used : pending).push(sms);
+        }
+
+        pending.sort((a, b) => b.arrivedAt - a.arrivedAt);
+        used.sort((a, b) => b.arrivedAt - a.arrivedAt);
+
+        renderList('pendingList', 'pendingCount', pending, false);
+        renderList('usedList', 'usedCount', used, true);
+        updateNumberFilter(numbers);
+        startExpiryTimer();
+    }
+
+    function renderList(containerId, countId, items, isUsed) {
+        const container = document.getElementById(containerId);
+        document.getElementById(countId).textContent = items.length;
+        if (!items.length) {
+            container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${isUsed?'📪':'📭'}</div><div>No ${isUsed?'used':'pending'} messages</div></div>`;
+            return;
+        }
+        container.innerHTML = items.map(sms => {
+            const time = new Date(sms.arrivedAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
+            const usedClass = sms.status === 'used' ? ' used' : '';
+            const code = sms.extractedCode || sms.code || '';
+            const remaining = Math.max(0, (sms.deleteAt - Date.now()) / 1000);
+            const total = (sms.deleteAt - sms.arrivedAt) / 1000;
+            const pct = total > 0 ? Math.max(0, Math.min(100, (remaining / total) * 100)) : 0;
+            const mins = Math.floor(remaining / 60), secs = Math.floor(remaining % 60);
+            const urgentClass = remaining < 60 ? ' urgent' : '';
+            const barColor = remaining < 60 ? 'var(--red)' : remaining < 180 ? 'var(--amber)' : 'var(--teal)';
+
+            return `<div class="sms-card${usedClass}" data-id="${sms.id}">
+                <div class="sms-sender">${esc(sms.sender)} → ${esc(sms.recipient)}</div>
+                <div class="sms-message">${esc(sms.message)}</div>
+                ${code ? `<div class="sms-code${usedClass}" onclick="copyCode('${esc(code)}')" title="Click to copy" style="cursor:pointer">${esc(code)} <span style="font-size:11px;opacity:0.6">📋</span></div>` : ''}
+                <div class="sms-time">${time}<span class="sms-status${usedClass}">${sms.status === 'used' ? ' • Used' : ' • Pending'}</span></div>
+                ${sms.status !== 'used' ? `<div class="expiry-bar-wrap"><div class="expiry-bar" style="width:${pct}%;background:${barColor}"></div></div><div class="expiry-countdown${urgentClass}">${mins}m ${secs}s remaining</div>` : ''}
+            </div>`;
+        }).join('');
+    }
+
+    function updateNumberFilter(numbers) {
+        const select = document.getElementById('numberFilter');
+        const current = select.value;
+        const sorted = Array.from(numbers).sort();
+        const options = ['<option value="">All Numbers</option>'].concat(sorted.map(n => `<option value="${n}"${n===current?' selected':''}>${n}</option>`));
+        select.innerHTML = options.join('');
+    }
+
+    function startExpiryTimer() {
+        if (expiryTimer) clearInterval(expiryTimer);
+        expiryTimer = setInterval(() => {
+            document.querySelectorAll('.expiry-countdown').forEach(el => {
+                const card = el.closest('.sms-card');
+                if (!card) return;
+                const id = card.getAttribute('data-id');
+                const sms = allMessages[id];
+                if (!sms || sms.status === 'used') return;
+                const remaining = Math.max(0, (sms.deleteAt - Date.now()) / 1000);
+                const mins = Math.floor(remaining / 60), secs = Math.floor(remaining % 60);
+                el.textContent = `${mins}m ${secs}s remaining`;
+                el.className = 'expiry-countdown' + (remaining < 60 ? ' urgent' : '');
+                const bar = card.querySelector('.expiry-bar');
+                if (bar) {
+                    const total = (sms.deleteAt - sms.arrivedAt) / 1000;
+                    const pct = total > 0 ? Math.max(0, (remaining / total) * 100) : 0;
+                    bar.style.width = pct + '%';
+                    bar.style.background = remaining < 60 ? 'var(--red)' : remaining < 180 ? 'var(--amber)' : 'var(--teal)';
+                }
+            });
+        }, 1000);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  ACTIONS — all check response status; 401 triggers re-login
+    // ═══════════════════════════════════════════════════════════
+
+    async function authFetch(url, options) {
+        try {
+            const res = await fetch(url, options);
+            if (res.status === 401) {
+                notify('🔑 Session expired — re-logging in...');
+                const pw = sessionStorage.getItem('getotp_pw');
+                if (pw) { setTimeout(() => autoLogin(pw), 500); }
+                else { doLogout(); }
+                return null;
+            }
+            if (!res.ok) {
+                notify('⚠️ Server error (' + res.status + ')');
+                return null;
+            }
+            return res;
+        } catch (e) {
+            notify('⚠️ Network error');
+            return null;
+        }
+    }
+
+    async function toggleForwarding() {
+        const btn = document.getElementById('forwardToggleBtn');
+        btn.disabled = true;
+        const newState = !globalForwarding;
+        const res = await authFetch('/api/toggle', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ enabled: newState }) });
+        if (res) {
+            globalForwarding = newState;
+            updateToggleBtn();
+            notify(newState ? '🟢 Forwarding enabled' : '🔴 Forwarding disabled');
+        }
+        btn.disabled = false;
+    }
+
+    function updateToggleBtn() {
+        const btn = document.getElementById('forwardToggleBtn');
+        btn.disabled = false;
+        if (globalForwarding) { btn.textContent = '🟢 Forwarding ON'; btn.className = 'forward-toggle-btn enabled'; }
+        else { btn.textContent = '🔴 Forwarding OFF'; btn.className = 'forward-toggle-btn disabled'; }
+    }
+
+    async function clearAllMessages() {
+        if (!confirm('Delete all SMS from server?')) return;
+        await authFetch('/api/clear-all', { method: 'POST', headers: authHeaders() });
+    }
+
+    async function clearForwardLog() {
+        const btn = document.getElementById('clearLogBtn');
+        btn.disabled = true;
+        const res = await authFetch('/api/clear-log', { method: 'POST', headers: authHeaders() });
+        if (res) notify('📋 Clear log sent to devices');
+        setTimeout(() => btn.disabled = false, 3000);
+    }
+
+    async function sendTestMessage() {
+        const btn = document.getElementById('testMsgBtn');
+        btn.disabled = true;
+        const res = await authFetch('/api/test', { method: 'POST', headers: authHeaders() });
+        if (res) notify('📡 Test message sent to devices');
+        setTimeout(() => btn.disabled = false, 3000);
+    }
+
+    function filterMessages() { renderAll(); }
+    function clearFilters() { document.getElementById('searchInput').value = ''; document.getElementById('numberFilter').value = ''; renderAll(); }
+
+    function copyCode(code) {
+        navigator.clipboard.writeText(code).then(() => notify('📋 Copied: ' + code)).catch(() => {});
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  CONFIG MODAL
+    // ═══════════════════════════════════════════════════════════
+    function openConfig() {
+        document.getElementById('configOverlay').classList.add('open');
+        document.getElementById('cfgAutoDelete').value = autoDeleteMinutes;
+        renderConfigFilters();
+    }
+    function closeConfig() { document.getElementById('configOverlay').classList.remove('open'); }
+
+    function renderConfigFilters() {
+        const defaultRule = configFilters.find(r => r.phoneNumber === 'DEFAULT') || { phoneNumber: 'DEFAULT', patterns: [] };
+        const numberRules = configFilters.filter(r => r.phoneNumber !== 'DEFAULT');
+        document.getElementById('defaultPatternsList').innerHTML = (defaultRule.patterns || []).map((p, i) =>
+            `<div class="config-row"><span class="pattern-text">${esc(p)}</span><button class="del-btn" onclick="removeDefaultPattern(${i})">✕</button></div>`
+        ).join('') || '<div style="color:var(--text-3);font-size:12px;padding:8px">No patterns — add at least one catch-all like (\\d{4,8})</div>';
+        document.getElementById('numberRulesList').innerHTML = numberRules.map((r, i) =>
+            `<div class="config-row"><span class="phone-label">${esc(r.phoneNumber)}</span><span class="pattern-text">${(r.patterns||[]).map(esc).join(', ')}</span><button class="del-btn" onclick="removeNumberRule(${i})">✕</button></div>`
+        ).join('') || '<div style="color:var(--text-3);font-size:12px;padding:8px">No number-specific rules</div>';
+    }
+
+    function addDefaultPattern() {
+        const input = document.getElementById('newDefaultPattern');
+        const p = input.value.trim(); if (!p) return;
+        let rule = configFilters.find(r => r.phoneNumber === 'DEFAULT');
+        if (!rule) { rule = { phoneNumber: 'DEFAULT', patterns: [] }; configFilters.push(rule); }
+        rule.patterns.push(p); input.value = ''; renderConfigFilters();
+    }
+    function removeDefaultPattern(idx) {
+        const rule = configFilters.find(r => r.phoneNumber === 'DEFAULT');
+        if (rule) { rule.patterns.splice(idx, 1); renderConfigFilters(); }
+    }
+    function addNumberRule() {
+        const phoneInput = document.getElementById('newRulePhone'), patInput = document.getElementById('newRulePattern');
+        const phone = phoneInput.value.trim(); if (!phone) return;
+        const pat = patInput.value.trim();
+        configFilters.push({ phoneNumber: phone, patterns: pat ? [pat] : ['(\\d{4,8})'] });
+        phoneInput.value = ''; patInput.value = ''; renderConfigFilters();
+    }
+    function removeNumberRule(idx) {
+        const numberRules = configFilters.filter(r => r.phoneNumber !== 'DEFAULT');
+        const defaultRules = configFilters.filter(r => r.phoneNumber === 'DEFAULT');
+        numberRules.splice(idx, 1);
+        configFilters = [...defaultRules, ...numberRules];
+        renderConfigFilters();
+    }
+
+    async function saveConfig() {
+        try {
+            await fetch('/api/filters', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ filters: configFilters }) });
+            const mins = parseInt(document.getElementById('cfgAutoDelete').value, 10) || 30;
+            await fetch('/api/auto-delete', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ minutes: mins }) });
+            autoDeleteMinutes = mins;
+            notify('💾 Settings saved');
+            closeConfig();
+        } catch (e) { notify('⚠️ Save failed'); }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  HELPERS
+    // ═══════════════════════════════════════════════════════════
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function notify(msg) {
+        const el = document.getElementById('notification');
+        el.textContent = msg; el.classList.add('show');
+        setTimeout(() => el.classList.remove('show'), 3000);
+    }
+    </script>
+</body>
+</html>

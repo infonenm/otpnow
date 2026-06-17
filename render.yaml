@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: getotp-server
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: API_KEY
+        generateValue: true
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      - key: OTP_PATTERNS
+        value: "(\\d{4,8})"
+      - key: AUTO_DELETE_MINUTES
+        value: "30"
+      - key: NODE_ENV
+        value: production
