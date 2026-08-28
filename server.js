@@ -1,5 +1,12 @@
 /**
- * server.js — GetOTP Render Server v4.5
+ * server.js — GetOTP Render Server v4.12.0
+ *
+ * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
+ * no single "GetOTP system version" — the app is far ahead (4.16.x) because it
+ * changes far more often. The one number that must agree is the one in
+ * package.json, this header, and the startup log line below; they had drifted
+ * to 4.5.0 / v4.5 / "v4.6" in three places, which made "which server is
+ * actually deployed?" unanswerable from the logs.
  *
  * ZERO external dependencies. No Firebase, no Google Sheets, no Cloudflare.
  * Everything runs in-memory on this single Render service.
@@ -22,6 +29,7 @@
  *   GET  /                → Dashboard
  */
 
+const crypto  = require('crypto');
 const express = require('express');
 const path    = require('path');
 const store   = require('./lib/store');
@@ -32,7 +40,6 @@ fcm.init();
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
-app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── CORS ───────────────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -53,6 +60,34 @@ function requireApiKey(req, res, next) {
     next();
 }
 
+/**
+ * Auth for the OTP fetch endpoint.
+ *
+ * SEPARATE from API_KEY on purpose. API_KEY authorises a device to POST SMS and
+ * is also the HMAC secret behind the dashboard token, so handing it to every
+ * fetching script would mean one leaked script grants both. GET_KEY does one
+ * thing and can be rotated on its own.
+ *
+ * OPT-IN: if GET_KEY is unset the endpoint behaves exactly as it does today.
+ * Deploy, confirm nothing broke, add the env var, then update the scripts.
+ *
+ * Cost: one string comparison. No round trip, no lookup, nothing measurable.
+ */
+function requireGetKey(req, res, next) {
+    const expected = process.env.GET_KEY || '';
+    if (!expected) return next();
+    const given = req.query.key || req.headers['x-get-key'] || '';
+    if (given.length !== expected.length) return res.status(401).json({ success: false, otp: '', error: 'Unauthorized' });
+    try {
+        if (!crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {
+            return res.status(401).json({ success: false, otp: '', error: 'Unauthorized' });
+        }
+    } catch (e) {
+        return res.status(401).json({ success: false, otp: '', error: 'Unauthorized' });
+    }
+    next();
+}
+
 function requireToken(req, res, next) {
     const auth  = req.headers.authorization || '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : (req.query.token || '');
@@ -66,25 +101,111 @@ function requireToken(req, res, next) {
 // ═════════════════════════════════════════════════════════════════
 
 // 1. RECEIVE SMS — from RenderForwarder on Android
+//
+// THE SERVER IS THE FINAL WORD ON THE OFF SWITCH.
+//
+// When forwarding is off on the dashboard, a message that arrives here is NOT
+// stored — not in smsMap, not in numberMap, not broadcast to the dashboard. The
+// device is supposed to have stopped sending already, but "supposed to" is not
+// a guarantee: a phone that is asleep, offline, force-stopped or simply hasn't
+// received the command yet will keep pushing. Enforcing it here means OFF means
+// off from the moment you press it, whatever any device believes.
+//
+// The reply is 200, not an error, ON PURPOSE. A 4xx would make the app's queue
+// treat this as a failure and retry the same message for the next ten passes;
+// a 5xx would do the same and blame the server. This is not a failure — it is a
+// message we deliberately declined, so the device should consider it done and
+// move on.
+//
+// Every reply also carries globalForwarding. That makes each push a free sync
+// point: a device that missed the OFF command learns it from the very next SMS
+// it forwards, with no extra request and no extra latency. (It cannot deliver an
+// ON that way — a device that is off sends nothing — which is why the alarm
+// chain and the worker still exist.)
 app.post('/sms', requireApiKey, (req, res) => {
     const { sender, recipient, message, arrivedAt } = req.body || {};
     if (!sender || !message) {
         return res.status(400).json({ error: 'Missing sender or message' });
     }
+
+    const forwarding = store.isForwardingEnabled();
+    if (!forwarding) {
+        console.log(`[server] Declined SMS from ${sender} — forwarding is OFF`);
+        return res.json({ success: true, ignored: true, globalForwarding: false });
+    }
+
     const result = store.addSms(sender, recipient || 'Unknown', message, arrivedAt || Date.now());
-    res.json({ success: true, id: result.id, code: result.code || null });
+    res.json({ success: true, id: result.id, code: result.code || null, globalForwarding: true });
 });
 
 // 2. OTP FETCH API — replaces Cloudflare Worker + Apps Script 2
-app.get('/get', (req, res) => {
+//
+// TWO MODES:
+//
+//   GET /get?number=X            immediate. Returns whatever is there right now.
+//                                Unchanged from every previous version.
+//
+//   GET /get?number=X&wait=20    long-poll. Holds the connection open for up to
+//                                20 seconds and answers THE INSTANT the SMS
+//                                arrives — no polling interval in the middle.
+//
+// The second mode is the single biggest latency win available here. A script
+// polling once a second adds 500 ms on average waiting for its own next tick;
+// that is more than the phone, the network and this server put together. With
+// wait=, the request is already parked when the SMS lands and the OTP goes out
+// on a connection that is already open.
+//
+// Long-poll consumes through exactly the same getOtp() path, so consume-on-read,
+// supersede and the dashboard update are identical. wait=0 (or omitted) is the
+// old behaviour byte for byte.
+const MAX_WAIT_SECONDS = 25;   // stays under proxy idle limits; clients re-ask
+
+app.get('/get', requireGetKey, async (req, res) => {
     const number = req.query.number;
     if (!number) return res.json({ success: false, otp: '', error: 'Missing number' });
-    const otp = store.getOtp(number);
+
+    // Always try the immediate path first — if it is already there, nobody waits.
+    let otp = store.getOtp(number);
     if (otp) return res.json({ success: true, otp });
-    return res.json({ success: false, otp: '' });
+
+    const wait = Math.min(Math.max(parseInt(req.query.wait, 10) || 0, 0), MAX_WAIT_SECONDS);
+    if (wait === 0) return res.json({ success: false, otp: '' });
+
+    // A long-poll can sit here for twenty seconds, so the client hanging up is
+    // an ordinary event, not an edge case.
+    let clientGone = false;
+    res.on('close', () => { clientGone = true; });
+
+    // Park. If the client hangs up we free the slot immediately rather than
+    // holding it until the deadline.
+    otp = await store.waitForOtp(number, wait * 1000, (cancel) => {
+        res.on('close', cancel);
+    });
+
+    if (clientGone) {
+        // The OTP was CONSUMED to answer a request that nobody is listening to
+        // any more. Put it back, or a dropped connection silently eats a code
+        // that was never delivered — with no way to fetch it again.
+        if (otp) store.unconsume(number, otp);
+        return;
+    }
+
+    if (otp) return res.json({ success: true, otp });
+    return res.json({ success: false, otp: '', timedOut: true });
 });
 
 // 3. SETTINGS FOR APP POLLING — replaces Firebase RTDB listeners
+//
+// This is the SECOND CARRIER for every dashboard command, not a legacy leftover:
+//   globalForwarding  the device converges on this level-triggered, every poll
+//   clearLogTs        one-shot, de-duplicated against FCM by timestamp
+//   testMessageTs     ditto
+//
+// The two timestamps are the same values passed to fcm.send() below, which is
+// exactly what lets the app run each command once no matter which carrier gets
+// there first. Do not remove them because "FCM handles that" — FCM is absent
+// after a force-stop and on devices without Play Services, and Test Message is
+// the button you press precisely when FCM is the thing that is broken.
 app.get('/api/settings', requireApiKey, (req, res) => {
     const s = store.getSettings();
     res.json({
@@ -173,6 +294,17 @@ app.get('/api/full-settings', requireToken, (req, res) => {
 
 
 // ═════════════════════════════════════════════════════════════════
+// STATIC (dashboard) — mounted LAST
+// ═════════════════════════════════════════════════════════════════
+//
+// Below the API routes on purpose. express.static does a filesystem stat on
+// every request that reaches it, so mounting it first made every /get and /sms
+// pay for a lookup of a file that was never going to exist. Nothing above
+// handles '/', so the dashboard still serves from here exactly as before.
+app.use(express.static(path.join(__dirname, 'public')));
+
+
+// ═════════════════════════════════════════════════════════════════
 // HEALTH
 // ═════════════════════════════════════════════════════════════════
 
@@ -184,9 +316,9 @@ app.get('/health', (req, res) => {
 // ─── Start server ───────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`[server] GetOTP Render v4.5 on port ${PORT}`);
+    console.log(`[server] GetOTP Render v${require('./package.json').version} on port ${PORT}`);
     console.log(`[server] POST /sms           — receive SMS`);
-    console.log(`[server] GET  /get           — OTP fetch`);
+    console.log(`[server] GET  /get           — OTP fetch (add &wait=20 to long-poll)`);
     console.log(`[server] GET  /api/settings  — app polling`);
     console.log(`[server] GET  /api/stream    — SSE dashboard`);
     console.log(`[server] GET  /              — dashboard`);

@@ -71,6 +71,7 @@
         .sms-code.used{background:var(--amber-dim);border-color:rgba(245,158,11,0.28);color:var(--amber)}
         .sms-time{color:var(--text-3);font-size:11px;font-family:var(--mono);letter-spacing:0.2px}
         .sms-status{display:inline-block;color:var(--teal);font-size:11px;margin-left:10px;font-family:var(--sans)}.sms-status.used{color:var(--amber)}
+        .sms-lag{color:var(--amber);font-size:11px;margin-left:8px;font-family:var(--sans)}
         .empty-state{text-align:center;padding:60px 20px;color:var(--text-3)}.empty-state-icon{font-size:42px;margin-bottom:12px;opacity:0.6}.empty-state div:last-child{font-size:13px;letter-spacing:0.2px}
         .expiry-bar-wrap{height:2px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:10px;overflow:hidden}
         .expiry-bar{height:100%;border-radius:2px;transition:width 1s linear,background 1s}
@@ -371,8 +372,10 @@
             (sms.status === 'used' ? used : pending).push(sms);
         }
 
-        pending.sort((a, b) => b.arrivedAt - a.arrivedAt);
-        used.sort((a, b) => b.arrivedAt - a.arrivedAt);
+        // receivedAt (server clock) — arrivedAt is the device's clock and can be
+        // skewed, or legitimately old for a message replayed off the app's queue.
+        pending.sort((a, b) => b.receivedAt - a.receivedAt);
+        used.sort((a, b) => b.receivedAt - a.receivedAt);
 
         renderList('pendingList', 'pendingCount', pending, false);
         renderList('usedList', 'usedCount', used, true);
@@ -392,17 +395,28 @@
             const usedClass = sms.status === 'used' ? ' used' : '';
             const code = sms.extractedCode || sms.code || '';
             const remaining = Math.max(0, (sms.deleteAt - Date.now()) / 1000);
-            const total = (sms.deleteAt - sms.arrivedAt) / 1000;
+            // deleteAt is derived from receivedAt, so the bar must be too — using
+            // arrivedAt made the total wrong (and the bar wider than 100%) for any
+            // message that reached the server late.
+            const total = (sms.deleteAt - sms.receivedAt) / 1000;
             const pct = total > 0 ? Math.max(0, Math.min(100, (remaining / total) * 100)) : 0;
             const mins = Math.floor(remaining / 60), secs = Math.floor(remaining % 60);
             const urgentClass = remaining < 60 ? ' urgent' : '';
             const barColor = remaining < 60 ? 'var(--red)' : remaining < 180 ? 'var(--amber)' : 'var(--teal)';
 
+            // A gap between the two clocks that large is not skew, it is the
+            // app's retry queue. Worth seeing: it is the difference between
+            // "the SMS never came" and "the SMS came and the push was late".
+            const lagSec = Math.round((sms.receivedAt - sms.arrivedAt) / 1000);
+            const lag = lagSec >= 60
+                ? ` <span class="sms-lag">• delivered ${Math.floor(lagSec / 60)}m late</span>`
+                : '';
+
             return `<div class="sms-card${usedClass}" data-id="${sms.id}">
                 <div class="sms-sender">${esc(sms.sender)} → ${esc(sms.recipient)}</div>
                 <div class="sms-message">${esc(sms.message)}</div>
                 ${code ? `<div class="sms-code${usedClass}" onclick="copyCode('${esc(code)}')" title="Click to copy" style="cursor:pointer">${esc(code)} <span style="font-size:11px;opacity:0.6">📋</span></div>` : ''}
-                <div class="sms-time">${time}<span class="sms-status${usedClass}">${sms.status === 'used' ? ' • Used' : ' • Pending'}</span></div>
+                <div class="sms-time">${time}${lag}<span class="sms-status${usedClass}">${sms.status === 'used' ? ' • Used' : ' • Pending'}</span></div>
                 ${sms.status !== 'used' ? `<div class="expiry-bar-wrap"><div class="expiry-bar" style="width:${pct}%;background:${barColor}"></div></div><div class="expiry-countdown${urgentClass}">${mins}m ${secs}s remaining</div>` : ''}
             </div>`;
         }).join('');
@@ -431,7 +445,7 @@
                 el.className = 'expiry-countdown' + (remaining < 60 ? ' urgent' : '');
                 const bar = card.querySelector('.expiry-bar');
                 if (bar) {
-                    const total = (sms.deleteAt - sms.arrivedAt) / 1000;
+                    const total = (sms.deleteAt - sms.receivedAt) / 1000;
                     const pct = total > 0 ? Math.max(0, (remaining / total) * 100) : 0;
                     bar.style.width = pct + '%';
                     bar.style.background = remaining < 60 ? 'var(--red)' : remaining < 180 ? 'var(--amber)' : 'var(--teal)';
