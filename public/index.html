@@ -126,6 +126,7 @@
             <button class="clear-all-btn" onclick="clearAllMessages()">🗑️ Clear All</button>
             <button class="clear-log-btn" id="clearLogBtn" onclick="clearForwardLog()">📋 Clear Log</button>
             <button class="test-msg-btn" id="testMsgBtn" onclick="sendTestMessage()">📡 Test</button>
+            <button class="test-msg-btn" id="fetchLatestBtn" onclick="fetchLatest()" title="Ask the device to forward its newest SMS — use when a code never arrived">📥 Get latest</button>
             <button class="logout-btn" onclick="doLogout()">Logout</button>
         </div>
         <div class="grid-container">
@@ -184,10 +185,7 @@
     window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('passwordInput').addEventListener('keyup', e => { if (e.key === 'Enter') doLogin(); });
         // Auto-login: try stored credentials first
-        const savedPw = sessionStorage.getItem('getotp_pw');
-        if (savedPw) {
-            autoLogin(savedPw);
-        } else if (token) {
+        if (token) {
             tryConnect();
         } else {
             showLogin();
@@ -218,14 +216,6 @@
         }
     }
 
-    async function autoLogin(pw) {
-        const ok = await loginWithPassword(pw);
-        if (!ok) {
-            sessionStorage.removeItem('getotp_pw');
-            showLogin();
-        }
-    }
-
     async function loginWithPassword(pw) {
         try {
             const res = await fetch('/api/login', {
@@ -237,13 +227,14 @@
             const data = await res.json();
             token = data.token;
             localStorage.setItem('getotp_token', token);
-            sessionStorage.setItem('getotp_pw', pw);  // survives reloads
             tryConnect();
             return true;
         } catch (e) { return false; }
     }
 
-    function doLogout() {
+    async function doLogout() {
+        // Tell the server first: a token the client merely forgets stays valid.
+        try { await fetch('/api/logout', { method: 'POST', headers: authHeaders() }); } catch (e) { }
         token = '';
         localStorage.removeItem('getotp_token');
         sessionStorage.removeItem('getotp_pw');
@@ -262,8 +253,6 @@
             const res = await fetch('/api/messages', { headers: authHeaders() });
             if (res.status === 401) {
                 // Token invalid (server restarted?) — try auto-login
-                const pw = sessionStorage.getItem('getotp_pw');
-                if (pw) { autoLogin(pw); return; }
                 doLogout(); return;
             }
             const data = await res.json();
@@ -285,8 +274,7 @@
         } catch (e) {
             // Network error — retry in 3 seconds
             setTimeout(() => {
-                const pw = sessionStorage.getItem('getotp_pw');
-                if (pw) autoLogin(pw); else showLogin();
+                showLogin();
             }, 3000);
         }
     }
@@ -342,10 +330,12 @@
                 sseRetryCount = 0;
                 eventSource.close();
                 eventSource = null;
-                const pw = sessionStorage.getItem('getotp_pw');
-                if (pw) {
-                    setTimeout(() => autoLogin(pw), 2000);
-                }
+                // The password is no longer kept, so there is nothing to
+                // re-login WITH. Send the user to the login screen rather than
+                // closing the stream and leaving a dashboard that silently
+                // receives nothing — which is what this did for one revision.
+                notify('Connection lost — please sign in again');
+                showLogin();
             }
         };
     }
@@ -469,9 +459,7 @@
             const res = await fetch(url, options);
             if (res.status === 401) {
                 notify('🔑 Session expired — re-logging in...');
-                const pw = sessionStorage.getItem('getotp_pw');
-                if (pw) { setTimeout(() => autoLogin(pw), 500); }
-                else { doLogout(); }
+                doLogout();
                 return null;
             }
             if (!res.ok) {
@@ -523,6 +511,18 @@
         btn.disabled = true;
         const res = await authFetch('/api/test', { method: 'POST', headers: authHeaders() });
         if (res) notify('📡 Test message sent to devices');
+        setTimeout(() => btn.disabled = false, 3000);
+    }
+
+    // Distinct from Test: that asks the device to invent a message, this asks it
+    // to go and find a real one it may never have seen. Nothing on the server can
+    // know whether such an SMS exists, so the wording promises a request, not a
+    // result — the message appears in the list if the device finds one.
+    async function fetchLatest() {
+        const btn = document.getElementById('fetchLatestBtn');
+        btn.disabled = true;
+        const res = await authFetch('/api/fetch-latest', { method: 'POST', headers: authHeaders() });
+        if (res) notify('📥 Asked devices for their latest SMS');
         setTimeout(() => btn.disabled = false, 3000);
     }
 

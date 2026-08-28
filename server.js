@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.15.0
+ * server.js — GetOTP Render Server v4.19.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead (4.16.x) because it
@@ -21,6 +21,8 @@
  *   POST /api/toggle      → Toggle forwarding (dashboard token auth)
  *   POST /api/clear-log   → Clear forward log on devices (dashboard token auth)
  *   POST /api/test        → Send test message to devices (dashboard token auth)
+ *   POST /api/fetch-latest → Ask devices to forward their newest SMS (token auth)
+ *   POST /api/logout      → Revoke the caller's session token (token auth)
  *   POST /api/clear-all   → Delete all SMS (dashboard token auth)
  *   POST /api/filters     → Update filter rules (dashboard token auth)
  *   POST /api/auto-delete → Update auto-delete minutes (dashboard token auth)
@@ -60,9 +62,69 @@ app.use(express.json({ limit: '100kb' }));
 const asyncRoute = fn => (req, res, next) =>
     Promise.resolve(fn(req, res, next)).catch(next);
 
-// ─── CORS ───────────────────────────────────────────────────────
+const DEFAULT_GATEWAYS = { bkash: [], rocket: [], dgepayebl: [] };
+
+function parseGateways() {
+    const raw = process.env.GATEWAYS;
+    if (!raw) return DEFAULT_GATEWAYS;
+    try {
+        const parsed = JSON.parse(raw);
+        const out = {};
+        for (const [name, tokens] of Object.entries(parsed)) {
+            if (!/^[a-z0-9_-]{1,32}$/i.test(name)) {
+                console.warn(`[server] Ignoring invalid gateway name: ${name}`);
+                continue;
+            }
+            out[name] = Array.isArray(tokens) ? tokens.map(String) : [];
+        }
+        return Object.keys(out).length ? out : DEFAULT_GATEWAYS;
+    } catch (e) {
+        console.warn(`[server] GATEWAYS is not valid JSON, using defaults: ${e.message}`);
+        return DEFAULT_GATEWAYS;
+    }
+}
+
+const GATEWAYS = parseGateways();
+const GATEWAY_PATHS = new Set(Object.keys(GATEWAYS).map(n => '/' + n));
+
+
+// ─── Security headers ───────────────────────────────────────────
+//
+// A CSP is the second line under output escaping: even if a future template
+// forgets esc(), an injected <script> has no source it is allowed to run from.
+// 'unsafe-inline' is required because the dashboard is one self-contained file
+// with inline styles and handlers — tightening that means splitting the file,
+// which is a bigger change than it looks and is noted as an open item.
 app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Security-Policy',
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data:; " +
+        "connect-src 'self'; " +
+        "frame-ancestors 'none'; " +   // clickjacking: nothing may frame this
+        "base-uri 'none'; " +          // an injected <base> cannot redirect loads
+        "form-action 'self'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');   // keeps ?token= out of Referer
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    next();
+});
+
+// ─── CORS ───────────────────────────────────────────────────────
+//
+// The wildcard stays ONLY for the fetch paths the userscript uses from other
+// origins (payment.bkash.com and friends). The dashboard API must not be
+// wildcarded: with credentials in headers rather than cookies a wildcard is not
+// directly exploitable, but it invites any page to probe these endpoints, and
+// nothing legitimate calls them cross-origin.
+app.use((req, res, next) => {
+    const isFetchPath = req.path === '/get' || GATEWAY_PATHS.has(req.path);
+    if (isFetchPath || req.path === '/health') {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Api-Key');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -199,7 +261,11 @@ app.get('/api/settings', requireApiKey, (req, res) => {
     res.json({
         globalForwarding: s.globalForwarding,
         clearLogTs:       s.clearLogTs,
-        testMessageTs:    s.testMessageTs
+        testMessageTs:    s.testMessageTs,
+        // Third one-shot. The poller is the carrier that survives a phone with
+        // no Play Services, so a command that only rode FCM would silently not
+        // work on exactly the devices most likely to have missed the SMS.
+        fetchLatestTs:    s.fetchLatestTs
     });
 });
 
@@ -232,29 +298,7 @@ app.get('/api/settings', requireApiKey, (req, res) => {
 // A scoped alias never consumes an OTP that is not its own, so two
 // gateways polling the same SIM cannot steal from each other.
 // =================================================================
-const DEFAULT_GATEWAYS = { bkash: [], rocket: [], dgepayebl: [] };
 
-function parseGateways() {
-    const raw = process.env.GATEWAYS;
-    if (!raw) return DEFAULT_GATEWAYS;
-    try {
-        const parsed = JSON.parse(raw);
-        const out = {};
-        for (const [name, tokens] of Object.entries(parsed)) {
-            if (!/^[a-z0-9_-]{1,32}$/i.test(name)) {
-                console.warn(`[server] Ignoring invalid gateway name: ${name}`);
-                continue;
-            }
-            out[name] = Array.isArray(tokens) ? tokens.map(String) : [];
-        }
-        return Object.keys(out).length ? out : DEFAULT_GATEWAYS;
-    } catch (e) {
-        console.warn(`[server] GATEWAYS is not valid JSON, using defaults: ${e.message}`);
-        return DEFAULT_GATEWAYS;
-    }
-}
-
-const GATEWAYS = parseGateways();
 
 /** Shared by /get and every gateway alias — one implementation of the fetch. */
 async function serveOtp(req, res, senderTokens) {
@@ -308,6 +352,14 @@ for (const [name, tokens] of Object.entries(GATEWAYS)) {
 // matter how many failures preceded it.
 let loginFailures = 0;
 const LOGIN_MAX_DELAY_MS = 5000;
+
+// Logout: kill the token server-side. Previously the client simply forgot it,
+// so a copied token stayed valid forever.
+app.post('/api/logout', requireToken, (req, res) => {
+    const h = req.headers.authorization || '';
+    store.revokeToken(h.startsWith('Bearer ') ? h.slice(7) : (req.query.token || ''));
+    res.json({ success: true });
+});
 
 app.post('/api/login', asyncRoute(async (req, res) => {
     const { password } = req.body || {};
@@ -363,6 +415,18 @@ app.post('/api/test', requireToken, (req, res) => {
     store.triggerTestMessage(ts);
     fcm.send('test', ts);
     res.json({ success: true });
+});
+
+// Force the device to fetch and forward its newest SMS.
+//
+// Distinct from /api/test, which asks the device to invent a message. This asks
+// it to go and find a real one it may never have seen — the case where the app
+// was force-stopped when the SMS arrived, and nothing on this server can know
+// the message ever existed.
+app.post('/api/fetch-latest', requireToken, (req, res) => {
+    const ts = store.triggerFetchLatest();
+    fcm.send('fetch_latest', ts);
+    res.json({ success: true, fetchLatestTs: ts });
 });
 
 // Clear all SMS from server
