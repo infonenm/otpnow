@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.12.0
+ * server.js — GetOTP Render Server v4.15.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead (4.16.x) because it
@@ -33,6 +33,7 @@ const crypto  = require('crypto');
 const express = require('express');
 const path    = require('path');
 const store   = require('./lib/store');
+const otp     = require('./lib/otp');
 const fcm     = require('./lib/fcm');
 
 // Initialize FCM (silent no-op if FIREBASE_SERVICE_ACCOUNT not set)
@@ -40,6 +41,24 @@ fcm.init();
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
+
+/**
+ * Wrap an async route so a rejected promise becomes a normal Express error.
+ *
+ * =================================================================
+ * WITHOUT THIS, ONE FAILURE TAKES THE WHOLE SERVICE DOWN.
+ *
+ * Express 4 does not catch rejections from an async handler, and
+ * Node terminates the process on an unhandled rejection. /get and
+ * every gateway alias are async, so a single unexpected throw
+ * anywhere under them ends the process — losing every OTP held in
+ * memory, dropping the dashboard, and forcing a cold start, which
+ * on the free tier is measured in seconds. Verified by experiment,
+ * not assumed.
+ * =================================================================
+ */
+const asyncRoute = fn => (req, res, next) =>
+    Promise.resolve(fn(req, res, next)).catch(next);
 
 // ─── CORS ───────────────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -160,39 +179,8 @@ app.post('/sms', requireApiKey, (req, res) => {
 // old behaviour byte for byte.
 const MAX_WAIT_SECONDS = 25;   // stays under proxy idle limits; clients re-ask
 
-app.get('/get', requireGetKey, async (req, res) => {
-    const number = req.query.number;
-    if (!number) return res.json({ success: false, otp: '', error: 'Missing number' });
+app.get('/get', requireGetKey, asyncRoute((req, res) => serveOtp(req, res, undefined)));
 
-    // Always try the immediate path first — if it is already there, nobody waits.
-    let otp = store.getOtp(number);
-    if (otp) return res.json({ success: true, otp });
-
-    const wait = Math.min(Math.max(parseInt(req.query.wait, 10) || 0, 0), MAX_WAIT_SECONDS);
-    if (wait === 0) return res.json({ success: false, otp: '' });
-
-    // A long-poll can sit here for twenty seconds, so the client hanging up is
-    // an ordinary event, not an edge case.
-    let clientGone = false;
-    res.on('close', () => { clientGone = true; });
-
-    // Park. If the client hangs up we free the slot immediately rather than
-    // holding it until the deadline.
-    otp = await store.waitForOtp(number, wait * 1000, (cancel) => {
-        res.on('close', cancel);
-    });
-
-    if (clientGone) {
-        // The OTP was CONSUMED to answer a request that nobody is listening to
-        // any more. Put it back, or a dropped connection silently eats a code
-        // that was never delivered — with no way to fetch it again.
-        if (otp) store.unconsume(number, otp);
-        return;
-    }
-
-    if (otp) return res.json({ success: true, otp });
-    return res.json({ success: false, otp: '', timedOut: true });
-});
 
 // 3. SETTINGS FOR APP POLLING — replaces Firebase RTDB listeners
 //
@@ -216,18 +204,130 @@ app.get('/api/settings', requireApiKey, (req, res) => {
 });
 
 
+// 2b. GATEWAY ALIASES — /bkash, /rocket, /dgepayebl …
+//
+// =================================================================
+// WHY THESE EXIST
+//
+// The Payment Auto Fill userscript calls /bkash?number=X,
+// /rocket?number=X and /dgepayebl?number=X. Those names come from a
+// different server; on this one they were plain 404s, so the script
+// received an HTML error page, JSON.parse threw, and it silently
+// retried twenty times over a minute before giving up. It looked
+// like "the OTP never arrived".
+//
+// Rather than edit a script that holds card details, the endpoints
+// exist here. Each is /get with an optional SENDER SCOPE.
+//
+// SCOPES ARE EMPTY BY DEFAULT, ON PURPOSE. An empty scope behaves
+// exactly like /get — the latest OTP for that number, whoever sent
+// it — so this works immediately without me guessing sender IDs I
+// cannot see. Once you know the real ones (they are on the
+// dashboard next to each message), set GATEWAYS and each alias will
+// only answer with an OTP from its own gateway.
+//
+//   GATEWAYS={"bkash":["bkash"],"rocket":["rocket","16216"],
+//             "dgepayebl":["EBL"]}
+//
+// A scoped alias never consumes an OTP that is not its own, so two
+// gateways polling the same SIM cannot steal from each other.
+// =================================================================
+const DEFAULT_GATEWAYS = { bkash: [], rocket: [], dgepayebl: [] };
+
+function parseGateways() {
+    const raw = process.env.GATEWAYS;
+    if (!raw) return DEFAULT_GATEWAYS;
+    try {
+        const parsed = JSON.parse(raw);
+        const out = {};
+        for (const [name, tokens] of Object.entries(parsed)) {
+            if (!/^[a-z0-9_-]{1,32}$/i.test(name)) {
+                console.warn(`[server] Ignoring invalid gateway name: ${name}`);
+                continue;
+            }
+            out[name] = Array.isArray(tokens) ? tokens.map(String) : [];
+        }
+        return Object.keys(out).length ? out : DEFAULT_GATEWAYS;
+    } catch (e) {
+        console.warn(`[server] GATEWAYS is not valid JSON, using defaults: ${e.message}`);
+        return DEFAULT_GATEWAYS;
+    }
+}
+
+const GATEWAYS = parseGateways();
+
+/** Shared by /get and every gateway alias — one implementation of the fetch. */
+async function serveOtp(req, res, senderTokens) {
+    const number = req.query.number;
+    if (!number) return res.json({ success: false, otp: '', error: 'Missing number' });
+
+    let otp = store.getOtp(number, senderTokens);
+    if (otp) return res.json({ success: true, otp });
+
+    const wait = Math.min(Math.max(parseInt(req.query.wait, 10) || 0, 0), MAX_WAIT_SECONDS);
+    if (wait === 0) return res.json({ success: false, otp: '' });
+
+    let clientGone = false;
+    res.on('close', () => { clientGone = true; });
+
+    otp = await store.waitForOtp(number, wait * 1000, (cancel) => {
+        res.on('close', cancel);
+    }, senderTokens);
+
+    if (clientGone) {
+        if (otp) store.unconsume(number, otp);
+        return;
+    }
+    if (otp) return res.json({ success: true, otp });
+    return res.json({ success: false, otp: '', timedOut: true });
+}
+
+for (const [name, tokens] of Object.entries(GATEWAYS)) {
+    app.get('/' + name, requireGetKey, asyncRoute((req, res) => serveOtp(req, res, tokens)));
+    console.log(`[server] Gateway alias /${name}`
+        + (tokens.length ? ` scoped to sender ${JSON.stringify(tokens)}` : ' (any sender)'));
+}
+
+
 // ═════════════════════════════════════════════════════════════════
 // DASHBOARD ENDPOINTS
 // ═════════════════════════════════════════════════════════════════
 
 // Login — password from env var, returns session token
-app.post('/api/login', (req, res) => {
+//
+// BACK-OFF ON FAILURE. The dashboard token never expires and cannot be revoked
+// short of changing the password, so an unlimited-rate guessing endpoint in
+// front of it is the weak point. Each consecutive failure delays the NEXT
+// failed answer, doubling to a five-second ceiling, which turns a feasible
+// online brute force into an infeasible one.
+//
+// Deliberately global rather than per-IP: an attacker rotating addresses would
+// walk straight past a per-IP counter, and Render sits behind a proxy so the
+// address is not trustworthy anyway. The delay applies ONLY to wrong passwords,
+// so it can never lock you out — the correct password answers immediately no
+// matter how many failures preceded it.
+let loginFailures = 0;
+const LOGIN_MAX_DELAY_MS = 5000;
+
+app.post('/api/login', asyncRoute(async (req, res) => {
     const { password } = req.body || {};
     if (!password) return res.status(400).json({ error: 'Missing password' });
+
     const token = store.login(password);
-    if (!token) return res.status(401).json({ error: 'Wrong password' });
+    if (!token) {
+        const delay = Math.min(100 * Math.pow(2, loginFailures), LOGIN_MAX_DELAY_MS);
+        loginFailures++;
+        console.warn(`[server] Failed dashboard login #${loginFailures} — delaying ${delay}ms`);
+        await new Promise(r => setTimeout(r, delay));
+        return res.status(401).json({ error: 'Wrong password' });
+    }
+
+    if (loginFailures > 0) {
+        console.log(`[server] Dashboard login OK after ${loginFailures} failed attempt(s)`);
+        loginFailures = 0;
+    }
     res.json({ token });
-});
+}));
 
 // All current messages
 app.get('/api/messages', requireToken, (req, res) => {
@@ -275,6 +375,28 @@ app.post('/api/clear-all', requireToken, (req, res) => {
 app.post('/api/filters', requireToken, (req, res) => {
     const { filters } = req.body || {};
     if (!Array.isArray(filters)) return res.status(400).json({ error: 'filters must be an array' });
+
+    // Refuse a rule that can never match. A double-escaped or group-less
+    // pattern looks perfectly fine sitting in the dashboard and silently loses
+    // every OTP from that sender — and because a sender rule does not fall back
+    // to DEFAULT, one bad paste kills that sender outright. Fail here instead.
+    const problems = [];
+    for (const rule of filters) {
+        const label = (rule && rule.phoneNumber) || '(unnamed)';
+        const pats = (rule && rule.patterns) || [];
+        if (!Array.isArray(pats) || pats.length === 0) {
+            problems.push(`${label}: no patterns`);
+            continue;
+        }
+        for (const p of pats) {
+            const why = otp.validatePattern(p);
+            if (why) problems.push(`${label}: ${why}  —  got ${JSON.stringify(p)}`);
+        }
+    }
+    if (problems.length) {
+        return res.status(400).json({ error: 'Some patterns would never match', problems });
+    }
+
     store.setFilters(filters);
     res.json({ success: true });
 });
@@ -289,7 +411,11 @@ app.post('/api/auto-delete', requireToken, (req, res) => {
 
 // Full settings (for dashboard settings panel)
 app.get('/api/full-settings', requireToken, (req, res) => {
-    res.json(store.getSettings());
+    // fcm included so "is push actually reaching my phones?" is answerable.
+    // send() is fire-and-forget by design, so without this a broken service
+    // account is completely silent — the dashboard toggle still returns 200 and
+    // the device just never hears about it.
+    res.json(Object.assign(store.getSettings(), { fcm: fcm.getStatus() }));
 });
 
 
@@ -304,12 +430,65 @@ app.get('/api/full-settings', requireToken, (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', uptime: process.uptime() | 0 });
+});
+
+
+// ═════════════════════════════════════════════════════════════════
+// 404 AND ERRORS — always JSON, never an HTML page
+// ═════════════════════════════════════════════════════════════════
+//
+// A mistyped endpoint used to return Express's HTML error page. The
+// fetching userscript does JSON.parse on the reply, so it threw, and
+// the catch treated it exactly like "OTP not ready" — retrying for a
+// minute against an endpoint that does not exist, with nothing said.
+// JSON here means a client always gets an answer it can read.
+app.use((req, res) => {
+    res.status(404).json({
+        success: false, otp: '',
+        error: `No such endpoint: ${req.method} ${req.path}`
+    });
+});
+
+// Four arguments — this is Express's error handler. asyncRoute funnels
+// every async failure here instead of into an unhandled rejection.
+app.use((err, req, res, next) => {
+    // Honour a status the error already carries. express.json() rejects a
+    // malformed body with status 400 — reporting that as 500 would tell the
+    // client the SERVER is broken when the request was, and send it retrying
+    // against a fault it can actually fix.
+    const status = (err && (err.status || err.statusCode)) || 500;
+
+    if (status >= 500) {
+        console.error(`[server] ${req.method} ${req.path} failed:`, err && err.stack || err);
+    }
+    if (res.headersSent) return;
+
+    res.status(status).json({
+        success: false, otp: '',
+        // A client error names itself; a server error never leaks its internals.
+        error: status < 500 ? (err.message || 'Bad request') : 'Internal error'
+    });
+});
+
+
 // ═════════════════════════════════════════════════════════════════
 // HEALTH
 // ═════════════════════════════════════════════════════════════════
 
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok', uptime: process.uptime() | 0 });
+
+// ─── Last-resort guards ─────────────────────────────────────────
+//
+// Staying up is worth more than a clean exit here. A crash loses every OTP in
+// memory and costs a cold start; a logged error costs a line in the log. The
+// error handler above catches everything routed through Express — these two
+// cover a timer, an SSE write or a background task that Express never sees.
+process.on('unhandledRejection', (reason) => {
+    console.error('[server] Unhandled rejection (kept running):', reason);
+});
+process.on('uncaughtException', (err) => {
+    console.error('[server] Uncaught exception (kept running):', err && err.stack || err);
 });
 
 
