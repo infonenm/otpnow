@@ -550,7 +550,7 @@
             `<div class="config-row"><span class="pattern-text">${esc(p)}</span><button class="del-btn" onclick="removeDefaultPattern(${i})">✕</button></div>`
         ).join('') || '<div style="color:var(--text-3);font-size:12px;padding:8px">No patterns — add at least one catch-all like (\\d{4,8})</div>';
         document.getElementById('numberRulesList').innerHTML = numberRules.map((r, i) =>
-            `<div class="config-row"><span class="phone-label">${esc(r.phoneNumber)}</span><span class="pattern-text">${(r.patterns||[]).map(esc).join(', ')}</span><button class="del-btn" onclick="removeNumberRule(${i})">✕</button></div>`
+            `<div class="config-row"><span class="phone-label">${esc(r.phoneNumber)}</span><span class="pattern-text">${(r.patterns||[]).map((p,n)=>`${n+1}. ${esc(p)}`).join('<br>')}</span><button class="del-btn" onclick="removeNumberRule(${i})">✕</button></div>`
         ).join('') || '<div style="color:var(--text-3);font-size:12px;padding:8px">No number-specific rules</div>';
     }
 
@@ -565,11 +565,32 @@
         const rule = configFilters.find(r => r.phoneNumber === 'DEFAULT');
         if (rule) { rule.patterns.splice(idx, 1); renderConfigFilters(); }
     }
+    // Sender matching strips spaces, underscores and hyphens, so IVAC_BD and
+    // IVACBD are the same sender.
+    const normSender = v => String(v || '').toUpperCase().replace(/[\s_-]/g, '');
+
     function addNumberRule() {
         const phoneInput = document.getElementById('newRulePhone'), patInput = document.getElementById('newRulePattern');
         const phone = phoneInput.value.trim(); if (!phone) return;
-        const pat = patInput.value.trim();
-        configFilters.push({ phoneNumber: phone, patterns: pat ? [pat] : ['(\\d{4,8})'] });
+        const pat = patInput.value.trim() || '(\\d{4,8})';
+
+        // Adding a second pattern for a sender you already have APPENDS it to
+        // that rule. It used to push a separate rule, which could never run —
+        // only the first rule matching a sender is used — so the fallback looked
+        // present and was silently dead.
+        const existing = configFilters.find(r =>
+            r.phoneNumber !== 'DEFAULT' && normSender(r.phoneNumber) === normSender(phone));
+        if (existing) {
+            existing.patterns = existing.patterns || [];
+            if (existing.patterns.includes(pat)) {
+                notify('That pattern is already on this rule');
+            } else {
+                existing.patterns.push(pat);
+                notify('Added as a fallback pattern for ' + existing.phoneNumber);
+            }
+        } else {
+            configFilters.push({ phoneNumber: phone, patterns: [pat] });
+        }
         phoneInput.value = ''; patInput.value = ''; renderConfigFilters();
     }
     function removeNumberRule(idx) {
