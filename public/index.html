@@ -415,7 +415,7 @@
             return `<div class="sms-card${usedClass}" data-id="${sms.id}">
                 <div class="sms-sender">${esc(sms.sender)} → ${esc(sms.recipient)}</div>
                 <div class="sms-message">${esc(sms.message)}</div>
-                ${code ? `<div class="sms-code${usedClass}" onclick="copyCode('${esc(code)}')" title="Click to copy" style="cursor:pointer">${esc(code)} <span style="font-size:11px;opacity:0.6">📋</span></div>` : ''}
+                ${code ? `<div class="sms-code${usedClass}" data-code="${esc(code)}" title="Click to copy" style="cursor:pointer">${esc(code)} <span style="font-size:11px;opacity:0.6">📋</span></div>` : ''}
                 <div class="sms-time">${time}${lag}<span class="sms-status${usedClass}">${sms.status === 'used' ? ' • Used' : ' • Pending'}</span></div>
                 ${sms.status !== 'used' ? `<div class="expiry-bar-wrap"><div class="expiry-bar" style="width:${pct}%;background:${barColor}"></div></div><div class="expiry-countdown${urgentClass}">${mins}m ${secs}s remaining</div>` : ''}
             </div>`;
@@ -426,7 +426,13 @@
         const select = document.getElementById('numberFilter');
         const current = select.value;
         const sorted = Array.from(numbers).sort();
-        const options = ['<option value="">All Numbers</option>'].concat(sorted.map(n => `<option value="${n}"${n===current?' selected':''}>${n}</option>`));
+        // esc() on BOTH the attribute and the text. Recipient is not trustworthy:
+        // canonicalizePhone returns the raw string when it cannot parse one, so
+        // anything that reaches POST /sms reaches this template verbatim. Without
+        // escaping, a crafted recipient closes the value="" and injects markup —
+        // which then runs in the dashboard origin, where the session token lives.
+        const options = ['<option value="">All Numbers</option>'].concat(
+            sorted.map(n => `<option value="${esc(n)}"${n===current?' selected':''}>${esc(n)}</option>`));
         select.innerHTML = options.join('');
     }
 
@@ -589,6 +595,16 @@
     //  HELPERS
     // ═══════════════════════════════════════════════════════════
     function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // The code used to be interpolated into an inline onclick="copyCode('...')".
+    // esc() escapes < > &, but NOT quotes — so a code containing an apostrophe
+    // would have closed the JS string. Filter patterns can capture letters and
+    // punctuation, so that was reachable. Reading it from a data attribute keeps
+    // the value as data and never as source.
+    document.addEventListener('click', (e) => {
+        const el = e.target.closest('.sms-code');
+        if (el && el.dataset.code) copyCode(el.dataset.code);
+    });
 
     function notify(msg) {
         const el = document.getElementById('notification');

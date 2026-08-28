@@ -1,11 +1,11 @@
 {
   "name": "getotp-render-server",
-  "version": "4.16.0",
+  "version": "4.17.0",
   "description": "GetOTP Render Server - in-memory SMS/OTP store, SSE dashboard, FCM control",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/phone.test.js && node test/store.test.js && node test/latency.test.js && node test/forwarding.test.js && node test/fcm.test.js && node test/gateway.test.js && node test/hardening.test.js"
+    "test": "node test/phone.test.js && node test/store.test.js && node test/latency.test.js && node test/forwarding.test.js && node test/fcm.test.js && node test/gateway.test.js && node test/hardening.test.js && node test/xss.test.js"
   },
   "engines": {
     "node": "20"
