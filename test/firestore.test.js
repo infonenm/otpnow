@@ -380,6 +380,34 @@ const mk = ${fakeDb.toString()};
         + out.stdout);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. A Firestore error must be a DIAGNOSIS, not a gRPC status code.
+//
+// The dashboard showed "5 NOT_FOUND:" — often with nothing after the colon.
+// That is a code, not an answer, and the cure ("create the database in the
+// Firebase console; enabling FCM does not create one") is unguessable from it.
+// Hit for real on the first deploy with FIRESTORE_ENABLED=true.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    const firestore = require('../lib/firestore');
+    assert.ok(/Create database/i.test(firestore.explain('5 NOT_FOUND: ')),
+        'NOT_FOUND must say the database has not been created');
+    assert.ok(/asia-southeast1/.test(firestore.explain('5 NOT_FOUND: ')),
+        'and name the region, since it is permanent and must match Render');
+    assert.ok(/Datastore User/.test(firestore.explain('7 PERMISSION_DENIED')),
+        'PERMISSION_DENIED must name the role to grant');
+    assert.ok(/different\s+project|revoked/.test(firestore.explain('16 UNAUTHENTICATED')),
+        'UNAUTHENTICATED must point at the credential');
+    assert.ok(/nothing about OTP delivery is affected/.test(
+            firestore.explain('Firestore read timed out after 3000ms')),
+        'a timeout must say plainly that OTPs are unaffected — that is the first '
+        + 'question anyone reading this has');
+    assert.strictEqual(firestore.explain('something unexpected'), 'something unexpected',
+        'an unrecognised error passes through verbatim rather than being guessed at');
+    assert.ok(/5 NOT_FOUND/.test(firestore.explain('5 NOT_FOUND: ')),
+        'the original text is kept — the explanation adds to it, never replaces it');
+}
+
 console.log('ok — Firestore is off the OTP path (0 calls), config loads and falls back, '
     + "migration runs once, and in server.js's own require order the cold-start "
     + 'window cannot extract a wrong code');

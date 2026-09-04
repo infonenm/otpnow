@@ -94,6 +94,23 @@
         .setting-row input[type=number]{width:80px;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-family:var(--mono);font-size:13px;outline:none}.setting-row input:focus{border-color:var(--teal)}
         .fcm-status{font-family:var(--mono);font-size:12px;line-height:1.7;color:var(--text-2);white-space:pre-wrap;word-break:break-word}
         .fcm-status .fcm-ok{color:var(--teal)}.fcm-status .fcm-bad{color:var(--red)}.fcm-status .fcm-idle{color:var(--text-3)}
+        .whoami{font-family:var(--mono);font-size:12px;color:var(--text-2);padding:0 6px}
+        .enroll-link{margin-top:14px;font-size:12.5px;color:var(--teal);cursor:pointer;opacity:.85}.enroll-link:hover{opacity:1}
+        .enroll-box{display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}.enroll-box.open{display:block}
+        .admin-row{display:flex;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
+        .admin-row .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .admin-row .mono{font-family:var(--mono);font-size:11.5px;color:var(--text-3)}
+        .admin-row button,.admin-row select{padding:5px 10px;font-size:11.5px;border-radius:7px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-1);cursor:pointer}
+        .admin-row button:hover{border-color:var(--teal)}
+        .pill{font-size:10.5px;padding:2px 7px;border-radius:20px;font-family:var(--mono)}
+        .pill-ok{background:rgba(0,212,170,.13);color:var(--teal)}.pill-off{background:rgba(248,113,113,.13);color:var(--red)}
+        .pill-idle{background:rgba(255,255,255,.06);color:var(--text-3)}
+        .code-box{font-family:var(--mono);font-size:15px;color:var(--teal);background:rgba(0,212,170,.08);border:1px solid rgba(0,212,170,.3);border-radius:8px;padding:10px;margin:8px 0;text-align:center;letter-spacing:2px}
+        .strip{display:flex;gap:2px;align-items:flex-end;height:56px;margin:6px 0 12px}
+        .strip div{flex:1;min-width:2px;background:var(--teal);opacity:.75;border-radius:2px 2px 0 0;cursor:pointer;transition:opacity .12s}
+        .strip div:hover{opacity:1}
+        .hist-row{padding:9px 0;border-bottom:1px solid var(--border);font-size:12.5px;display:flex;gap:10px;align-items:baseline}
+        .hist-row .msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
         .config-error{display:none;margin:0 0 12px;padding:11px 14px;background:rgba(255,77,77,0.08);border:1px solid rgba(255,77,77,0.35);border-radius:var(--radius);color:var(--red);font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)}.config-error.show{display:block}
         .save-config-btn{padding:12px 24px;background:var(--teal);border:none;border-radius:var(--radius);color:#021a15;font-weight:700;font-size:14px;cursor:pointer;transition:all .15s;margin-top:8px}.save-config-btn:hover{opacity:0.9;transform:translateY(-1px)}
     </style>
@@ -103,9 +120,20 @@
     <div id="loginScreen" class="login-container">
         <div class="login-box">
             <h2><span>GetOTP</span> Dashboard</h2>
-            <input type="password" id="passwordInput" placeholder="Dashboard password" autocomplete="current-password">
+            <!-- Username is OPTIONAL and blank means admin, which is exactly
+                 how this screen behaved before users existed. -->
+            <input type="text" id="usernameInput" placeholder="Username (leave blank for admin)" autocomplete="username">
+            <input type="password" id="passwordInput" placeholder="Password" autocomplete="current-password">
             <button onclick="doLogin()">Login</button>
             <div id="loginError" class="error"></div>
+            <div id="enrollToggle" class="enroll-link" onclick="toggleEnroll()">First time? Set your password →</div>
+            <div id="enrollBox" class="enroll-box">
+                <input type="text" id="enrollUser" placeholder="Username">
+                <input type="text" id="enrollCode" placeholder="Enrollment code (e.g. VUK5-X7DT)">
+                <input type="password" id="enrollPassword" placeholder="Choose a password (8+ characters)">
+                <button onclick="doEnroll()">Set password</button>
+                <div id="enrollError" class="error"></div>
+            </div>
         </div>
     </div>
 
@@ -116,8 +144,12 @@
             <div class="status-indicator">
                 <div class="live-indicator"><div class="live-dot"></div> Live</div>
                 <div id="connectionStatus" class="connection-status">Connecting...</div>
+                <span id="whoami" class="whoami"></span>
                 <button class="config-btn" onclick="openConfig()">⚙️ Filters & Settings</button>
+                <button class="config-btn admin-only" id="adminBtn" onclick="openAdmin()">👥 Users &amp; Devices</button>
+                <button class="config-btn admin-only" id="historyBtn" onclick="openHistory()">🕘 History</button>
                 <button id="forwardToggleBtn" class="forward-toggle-btn disabled" onclick="toggleForwarding()" disabled>⏳ Loading...</button>
+                <button id="overrideBtn" class="config-btn user-only" onclick="startOverride()" style="display:none"></button>
             </div>
             <div class="search-bar">
                 <input type="text" id="searchInput" placeholder="🔍 Filter by number..." oninput="filterMessages()">
@@ -127,6 +159,11 @@
                 <button class="clear-btn" onclick="clearFilters()">Clear</button>
             </div>
             <button class="clear-all-btn" onclick="clearAllMessages()">🗑️ Clear All</button>
+            <!-- Targeting. Admin only: a user can only ever command their own
+                 phones, so the control would be a lie for them. -->
+            <select class="filter-dropdown admin-only" id="commandTarget" title="Which phones the buttons below act on">
+                <option value="all">All users</option>
+            </select>
             <button class="clear-log-btn" id="clearLogBtn" onclick="clearForwardLog()">📋 Clear Log</button>
             <button class="test-msg-btn" id="testMsgBtn" onclick="sendTestMessage()">📡 Test</button>
             <button class="test-msg-btn" id="fetchLatestBtn" onclick="fetchLatest()" title="Ask the device to forward its newest SMS — use when a code never arrived">📥 Get latest</button>
@@ -189,6 +226,54 @@
             <button class="save-config-btn" onclick="saveConfig()">💾 Save All Changes</button>
         </div>
     </div>
+    <!-- USERS & DEVICES (admin) -->
+    <div id="adminOverlay" class="config-overlay" onclick="if(event.target===this)closeAdmin()">
+        <div class="config-modal">
+            <h3>👥 Users &amp; Devices <button class="config-close" onclick="closeAdmin()">✕</button></h3>
+            <div id="adminNotice" class="config-error"></div>
+            <div class="config-section"><h4>Users</h4><div id="usersList"></div>
+                <div class="config-add"><input id="newUserName" placeholder="Name, e.g. Rahim"><button onclick="createUser()">+ Create</button></div>
+            </div>
+            <div class="config-section"><h4>Devices</h4><div id="devicesList"></div></div>
+            <div class="config-section"><h4>Allowed server hosts</h4>
+                <div id="hostsList"></div>
+                <div class="config-add"><input id="newHost" placeholder="spare.onrender.com"><button onclick="addHost()">+ Add</button></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- HISTORY (admin) -->
+    <div id="historyOverlay" class="config-overlay" onclick="if(event.target===this)closeHistory()">
+        <div class="config-modal">
+            <h3>🕘 History <button class="config-close" onclick="closeHistory()">✕</button></h3>
+            <div id="historyNotice" class="config-error"></div>
+            <div class="config-section"><h4>Last 30 days</h4>
+                <div id="historyStrip" class="strip"></div>
+                <div id="historyTotals" class="fcm-status">—</div>
+            </div>
+            <div class="config-section"><h4>Messages</h4>
+                <div class="config-add">
+                    <select id="histUser" onchange="loadHistory()"><option value="">All users</option></select>
+                    <select id="histOutcome" onchange="renderHistory()">
+                        <option value="">Any outcome</option>
+                        <option value="fetched">fetched</option>
+                        <option value="expired">never fetched</option>
+                        <option value="superseded">superseded</option>
+                        <option value="no_code">no code extracted</option>
+                    </select>
+                    <input id="histSearch" placeholder="sender or number" oninput="renderHistory()">
+                </div>
+                <div id="historyList" style="margin-top:10px"></div>
+            </div>
+            <div class="config-section"><h4>Delete</h4>
+                <div class="config-add">
+                    <input id="histOlderThan" type="number" min="0" value="30" style="max-width:110px">
+                    <button onclick="deleteHistoryOlder()">Delete older than N days</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="notification" class="notification"></div>
 
     <script>
@@ -203,6 +288,10 @@
     let autoDeleteMinutes = 30;
     let fcmStatus = null;
     let configStatus = null;
+    let me = { userId: 'admin', role: 'admin' };
+    let identity = null;
+    let historyStats = null;
+    let historyRows = [];
     let expiryTimer = null;
 
     // ═══════════════════════════════════════════════════════════
@@ -231,6 +320,35 @@
     // ═══════════════════════════════════════════════════════════
     //  AUTH — survives page reloads AND server restarts
     // ═══════════════════════════════════════════════════════════
+    function toggleEnroll() {
+        document.getElementById('enrollBox').classList.toggle('open');
+    }
+
+    /**
+     * First login: username + the one-time code the admin gave you.
+     * Deliberately unauthenticated — the code IS the authentication, and it is
+     * what stops a passwordless account belonging to whoever learns the name.
+     */
+    async function doEnroll() {
+        const err = document.getElementById('enrollError');
+        err.textContent = '';
+        try {
+            const res = await fetch('/api/set-password', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: document.getElementById('enrollUser').value.trim(),
+                    code:     document.getElementById('enrollCode').value.trim(),
+                    password: document.getElementById('enrollPassword').value
+                })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { err.textContent = data.error || 'Could not set the password'; return; }
+            document.getElementById('usernameInput').value = document.getElementById('enrollUser').value.trim();
+            document.getElementById('enrollBox').classList.remove('open');
+            notify('✅ Password set — you can sign in now');
+        } catch (e) { err.textContent = 'Network error'; }
+    }
+
     async function doLogin() {
         const pw = document.getElementById('passwordInput').value.trim();
         if (!pw) return;
@@ -247,11 +365,16 @@
             const res = await fetch('/api/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: pw })
+                body: JSON.stringify({
+                    password: pw,
+                    // Blank = admin, exactly as this screen behaved before.
+                    username: document.getElementById('usernameInput').value.trim()
+                })
             });
             if (!res.ok) return false;
             const data = await res.json();
             token = data.token;
+            me = { userId: data.userId || 'admin', role: data.role || 'admin' };
             localStorage.setItem('getotp_token', token);
             tryConnect();
             return true;
@@ -294,6 +417,10 @@
                 autoDeleteMinutes = s.autoDeleteMinutes || 30;
                 fcmStatus = s.fcm || null;
                 configStatus = s.config || null;
+                identity = s.identity || null;
+                historyStats = s.history || null;
+                if (s.me) me = s.me;
+                applyRole();
                 updateToggleBtn();
             }
 
@@ -366,6 +493,62 @@
                 showLogin();
             }
         };
+    }
+
+    /**
+     * Show only what this caller can actually use.
+     *
+     * Cosmetic ONLY — every one of these endpoints is enforced server-side, and
+     * hiding a button is not a permission. This exists so a user is not
+     * presented with controls that would answer 403.
+     */
+    function applyRole() {
+        const isAdmin = me.role === 'admin';
+        document.querySelectorAll('.admin-only')
+            .forEach(el => el.style.display = isAdmin ? '' : 'none');
+        document.getElementById('whoami').textContent =
+            isAdmin ? 'admin' : me.userId;
+        if (isAdmin) fillTargetDropdown();
+        renderOverrideButton();
+    }
+
+    function fillTargetDropdown() {
+        const sel = document.getElementById('commandTarget');
+        if (!sel || !identity) return;
+        const current = sel.value;
+        const names = (identity.userList || []).slice();
+        sel.innerHTML = '<option value="all">All users</option>'
+            + names.map(u => `<option value="${esc(u)}">${esc(u)}</option>`).join('');
+        sel.value = current || 'all';
+    }
+
+    /**
+     * A user turning their OWN phones back on while the global switch is off.
+     * The server clamps the length and is the authority on when it ends — this
+     * button only asks.
+     */
+    function renderOverrideButton() {
+        const btn = document.getElementById('overrideBtn');
+        if (!btn) return;
+        if (me.role === 'admin' || globalForwarding) { btn.style.display = 'none'; return; }
+        btn.style.display = '';
+        const left = (identity && identity.overrides && identity.overrides[me.userId])
+            ? identity.overrides[me.userId].remainingMs : 0;
+        btn.textContent = left > 0
+            ? '🟢 My phones on — ' + Math.ceil(left / 60000) + ' min left'
+            : '▶️ Turn my phones on';
+    }
+
+    async function startOverride() {
+        const res = await authFetch('/api/override', {
+            method: 'POST', headers: authHeaders(), body: JSON.stringify({})
+        });
+        if (!res) return;
+        const d = await res.json();
+        notify(d.clamped
+            ? `▶️ On for ${d.minutes} min (admin ceiling is ${d.ceiling})`
+            : `▶️ Your phones are on for ${d.minutes} min`);
+        await refreshFcmStatus();
     }
 
     function setConnectionStatus(connected) {
@@ -529,7 +712,8 @@
     async function clearForwardLog() {
         const btn = document.getElementById('clearLogBtn');
         btn.disabled = true;
-        const res = await authFetch('/api/clear-log', { method: 'POST', headers: authHeaders() });
+        const res = await authFetch('/api/clear-log', { method: 'POST', headers: authHeaders(),
+            body: JSON.stringify({ target: commandTargetValue() }) });
         if (res) notify('📋 Clear log sent to devices');
         setTimeout(() => btn.disabled = false, 3000);
     }
@@ -537,7 +721,8 @@
     async function sendTestMessage() {
         const btn = document.getElementById('testMsgBtn');
         btn.disabled = true;
-        const res = await authFetch('/api/test', { method: 'POST', headers: authHeaders() });
+        const res = await authFetch('/api/test', { method: 'POST', headers: authHeaders(),
+            body: JSON.stringify({ target: commandTargetValue() }) });
         if (res) notify('📡 Test message sent to devices');
         setTimeout(() => btn.disabled = false, 3000);
     }
@@ -549,9 +734,17 @@
     async function fetchLatest() {
         const btn = document.getElementById('fetchLatestBtn');
         btn.disabled = true;
-        const res = await authFetch('/api/fetch-latest', { method: 'POST', headers: authHeaders() });
+        const res = await authFetch('/api/fetch-latest', { method: 'POST', headers: authHeaders(),
+            body: JSON.stringify({ target: commandTargetValue() }) });
         if (res) notify('📥 Asked devices for their latest SMS');
         setTimeout(() => btn.disabled = false, 3000);
+    }
+
+    /** Admin may aim a command; a user can only ever act on their own phones. */
+    function commandTargetValue() {
+        if (me.role !== 'admin') return 'all';
+        const sel = document.getElementById('commandTarget');
+        return sel ? sel.value : 'all';
     }
 
     function filterMessages() { renderAll(); }
@@ -581,8 +774,12 @@
             const s = await res.json();
             fcmStatus = s.fcm || null;
             configStatus = s.config || null;
+            identity = s.identity || null;
+            historyStats = s.history || null;
+            if (s.me) me = s.me;
             renderFcmStatus();
             renderConfigStatus();
+            renderOverrideButton();
         } catch (e) { /* the cached value stays on screen */ }
     }
 
@@ -852,6 +1049,309 @@
         const el = e.target.closest('.sms-code');
         if (el && el.dataset.code) copyCode(el.dataset.code);
     });
+
+    // ═══════════════════════════════════════════════════════════
+    //  USERS & DEVICES (admin)
+    // ═══════════════════════════════════════════════════════════
+
+    async function openAdmin() {
+        document.getElementById('adminOverlay').classList.add('open');
+        document.getElementById('adminNotice').classList.remove('show');
+        await loadAdmin();
+    }
+    function closeAdmin() { document.getElementById('adminOverlay').classList.remove('open'); }
+
+    function adminNotice(text, isError) {
+        const el = document.getElementById('adminNotice');
+        el.textContent = text;
+        el.classList.toggle('show', !!text);
+        el.style.color = isError ? 'var(--red)' : 'var(--teal)';
+        el.style.borderColor = isError ? 'rgba(255,77,77,0.35)' : 'rgba(0,212,170,0.35)';
+    }
+
+    async function loadAdmin() {
+        try {
+            const [u, d, h] = await Promise.all([
+                fetch('/api/users',   { headers: authHeaders() }),
+                fetch('/api/devices', { headers: authHeaders() }),
+                fetch('/api/allowed-hosts', { headers: authHeaders() })
+            ]);
+            if (!u.ok) { adminNotice(await describeFailure(u), true); return; }
+            const users = (await u.json()).users || [];
+            const devices = (await d.json()).devices || [];
+            const hosts = (await h.json()).hosts || [];
+            renderUsers(users);
+            renderDevices(devices, users);
+            renderHosts(hosts);
+        } catch (e) { adminNotice('Could not reach the server', true); }
+    }
+
+    function renderUsers(users) {
+        const el = document.getElementById('usersList');
+        if (!users.length) { el.innerHTML = '<div class="mono">No users yet</div>'; return; }
+        el.innerHTML = users.map(u => `
+            <div class="admin-row">
+                <span class="grow">${esc(u.name)} <span class="mono">${esc(u.id)}</span></span>
+                <span class="pill ${u.active ? 'pill-ok' : 'pill-off'}">${u.active ? 'active' : 'deactivated'}</span>
+                <span class="pill pill-idle">${u.deviceCount} phone${u.deviceCount === 1 ? '' : 's'}</span>
+                ${u.hasPassword ? '' : '<span class="pill pill-idle">awaiting enrollment</span>'}
+                <button data-act="${u.active ? 'deactivate' : 'activate'}" data-id="${esc(u.id)}">${u.active ? 'Deactivate' : 'Reactivate'}</button>
+                <button data-act="reissue" data-id="${esc(u.id)}">Reset password</button>
+                <button data-act="purge" data-id="${esc(u.id)}">Purge</button>
+            </div>`).join('')
+            // An unclaimed code has to stay visible: it is shown once at
+            // creation, and losing it before it is handed over means the
+            // account cannot be enrolled at all.
+            + users.filter(u => u.enrollCode).map(u =>
+                `<div class="code-box">${esc(u.name)} — enrollment code: ${esc(u.enrollCode)}</div>`).join('');
+    }
+
+    function renderDevices(devices, users) {
+        const el = document.getElementById('devicesList');
+        if (!devices.length) {
+            el.innerHTML = '<div class="mono">No devices have registered yet. '
+                + 'Install app 4.28.0 on a phone and it will appear here.</div>';
+            return;
+        }
+        const opts = ['<option value="">— unassigned —</option>', '<option value="admin">admin</option>']
+            .concat(users.map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`)).join('');
+        const now = Date.now();
+        el.innerHTML = devices.map(d => {
+            const age = d.lastSeen ? Math.round((now - d.lastSeen) / 1000) : null;
+            // Two poll intervals: one missed poll is normal, two is a phone
+            // worth looking at.
+            const live = age !== null && age < 90;
+            return `<div class="admin-row">
+                <span class="grow">${esc(d.name)} <span class="mono">${esc(d.id.slice(0,8))}</span></span>
+                <span class="pill ${live ? 'pill-ok' : 'pill-idle'}">${
+                    age === null ? 'never seen' : live ? 'online' : seenAgo(age)}</span>
+                <select data-assign="${esc(d.id)}">${
+                    opts.replace(`value="${esc(d.userId || '')}"`, `value="${esc(d.userId || '')}" selected`)}</select>
+                <button data-act="removeDevice" data-id="${esc(d.id)}">Remove</button>
+            </div>`;
+        }).join('');
+    }
+
+    function seenAgo(sec) {
+        if (sec < 3600) return Math.round(sec / 60) + 'm ago';
+        if (sec < 86400) return Math.round(sec / 3600) + 'h ago';
+        return Math.round(sec / 86400) + 'd ago';
+    }
+
+    function renderHosts(hosts) {
+        const el = document.getElementById('hostsList');
+        el.innerHTML = (hosts.length
+            ? hosts.map((h, i) => `<div class="admin-row"><span class="grow mono">${esc(h)}</span>`
+                + `<button data-act="removeHost" data-id="${i}">✕</button></div>`).join('')
+            : '<div class="mono">Not configured — phones accept any host. '
+              + 'Their built-in server is always allowed either way.</div>');
+        window._hosts = hosts;
+    }
+
+    async function adminPost(url, body, okMsg) {
+        try {
+            const res = await fetch(url, { method: 'POST', headers: authHeaders(),
+                                           body: JSON.stringify(body || {}) });
+            if (!res.ok) { adminNotice(await describeFailure(res), true); return null; }
+            const data = await res.json();
+            if (okMsg) adminNotice(okMsg, false);
+            await loadAdmin();
+            return data;
+        } catch (e) { adminNotice('Could not reach the server', true); return null; }
+    }
+
+    async function createUser() {
+        const name = document.getElementById('newUserName').value.trim();
+        if (!name) return;
+        const d = await adminPost('/api/users', { name });
+        if (d) {
+            document.getElementById('newUserName').value = '';
+            adminNotice('Created ' + name + '. Enrollment code: ' + d.enrollCode
+                + ' — give it to them; it works once.', false);
+        }
+    }
+
+    function setUserActive(id, active) {
+        if (!active && !confirm('Deactivate ' + id + '?\n\n'
+            + 'They lose every dashboard control immediately, even mid-session.\n'
+            + 'Their phones keep forwarding, to admin.')) return;
+        adminPost('/api/users/' + encodeURIComponent(id) + '/active', { active },
+            active ? id + ' reactivated' : id + ' deactivated — their phones now file to admin');
+    }
+
+    async function reissue(id) {
+        if (!confirm('Reset the password for ' + id + '?\n\n'
+            + 'Their current password stops working immediately.')) return;
+        const d = await adminPost('/api/users/' + encodeURIComponent(id) + '/reissue');
+        if (d) adminNotice('New enrollment code for ' + id + ': ' + d.enrollCode, false);
+    }
+
+    function purgeUser(id) {
+        if (!confirm('PURGE ' + id + '?\n\nThis cannot be undone. Their devices become '
+            + 'unassigned.\nTheir history is kept — a message records what happened '
+            + 'when it happened.\n\nDeactivate instead if you are not certain.')) return;
+        adminPost('/api/users/' + encodeURIComponent(id) + '/purge', {}, id + ' purged');
+    }
+
+    function assignDevice(id, userId) {
+        adminPost('/api/devices/' + encodeURIComponent(id) + '/assign',
+            { userId: userId || null }, 'Device assigned');
+    }
+
+    function removeDevice(id) {
+        if (!confirm('Remove this device?\n\nIt will re-register the next time the app starts.')) return;
+        adminPost('/api/devices/' + encodeURIComponent(id) + '/remove', {}, 'Device removed');
+    }
+
+    function addHost() {
+        const h = document.getElementById('newHost').value.trim();
+        if (!h) return;
+        document.getElementById('newHost').value = '';
+        adminPost('/api/allowed-hosts', { hosts: (window._hosts || []).concat([h]) }, 'Hosts updated');
+    }
+
+    function removeHost(i) {
+        const next = (window._hosts || []).slice();
+        next.splice(i, 1);
+        adminPost('/api/allowed-hosts', { hosts: next }, 'Hosts updated');
+    }
+
+    /**
+     * One delegated handler for every admin row control.
+     *
+     * The ids here are server-generated slugs and hex, so passing an escaped id
+     * as an argument inside an inline handler would be safe TODAY — but esc()
+     * escapes for an HTML context, not a JavaScript string one, and the day an
+     * id can contain an apostrophe that becomes an injection. Reading the value
+     * from a data attribute keeps it data and never source.
+     *
+     * xss.test.js failed on the first version of this modal, which did exactly
+     * that. Note it scans the raw file, so even describing the bad pattern
+     * literally in a comment trips it — that is the test being blunt rather
+     * than clever, and blunt is the right trade for this particular rule.
+     */
+    document.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-act]');
+        if (!b) return;
+        const id = b.getAttribute('data-id');
+        switch (b.getAttribute('data-act')) {
+            case 'deactivate':   setUserActive(id, false); break;
+            case 'activate':     setUserActive(id, true);  break;
+            case 'reissue':      reissue(id);              break;
+            case 'purge':        purgeUser(id);            break;
+            case 'removeDevice': removeDevice(id);         break;
+            case 'removeHost':   removeHost(parseInt(id, 10)); break;
+        }
+    });
+
+    document.addEventListener('change', (e) => {
+        const sel = e.target.closest('[data-assign]');
+        if (sel) assignDevice(sel.getAttribute('data-assign'), sel.value);
+    });
+
+    // ═══════════════════════════════════════════════════════════
+    //  HISTORY (admin)
+    // ═══════════════════════════════════════════════════════════
+
+    async function openHistory() {
+        document.getElementById('historyOverlay').classList.add('open');
+        document.getElementById('historyNotice').classList.remove('show');
+        await loadHistory();
+    }
+    function closeHistory() { document.getElementById('historyOverlay').classList.remove('open'); }
+
+    function historyNotice(text, isError) {
+        const el = document.getElementById('historyNotice');
+        el.textContent = text;
+        el.classList.toggle('show', !!text);
+        el.style.color = isError ? 'var(--red)' : 'var(--teal)';
+    }
+
+    async function loadHistory() {
+        try {
+            const user = document.getElementById('histUser').value;
+            const [sum, list] = await Promise.all([
+                fetch('/api/history/summary?days=30', { headers: authHeaders() }),
+                fetch('/api/history?limit=300' + (user ? '&userId=' + encodeURIComponent(user) : ''),
+                      { headers: authHeaders() })
+            ]);
+            if (!sum.ok) { historyNotice(await describeFailure(sum), true); return; }
+            renderStrip(await sum.json());
+            historyRows = (await list.json()).messages || [];
+            fillHistoryUsers();
+            renderHistory();
+        } catch (e) { historyNotice('Could not reach the server', true); }
+    }
+
+    function fillHistoryUsers() {
+        const sel = document.getElementById('histUser');
+        if (sel.options.length > 1) return;
+        const seen = Array.from(new Set(historyRows.map(r => r.userId))).sort();
+        sel.innerHTML = '<option value="">All users</option>'
+            + seen.map(u => `<option value="${esc(u)}">${esc(u)}</option>`).join('');
+    }
+
+    /**
+     * One bar per day. The point is that a bad day is visible BEFORE you read
+     * anything — "IVAC sent nothing on the 12th" without querying for it.
+     */
+    function renderStrip(sum) {
+        const el = document.getElementById('historyStrip');
+        const days = sum.days || [];
+        const max = Math.max(1, ...days.map(d => d.total));
+        el.innerHTML = days.map(d =>
+            `<div style="height:${Math.max(3, (d.total / max) * 100)}%;opacity:${
+                d.total && d.fetched / d.total < 0.5 ? '1' : '.6'}"
+                title="${esc(d.day)} — ${d.total} message(s), ${d.fetched} fetched"></div>`).join('')
+            || '<div class="mono">no data yet</div>';
+
+        const t = sum.totals || {};
+        document.getElementById('historyTotals').innerHTML =
+            `<span class="fcm-ok">${t.total || 0}</span> archived · `
+          + `<span class="fcm-ok">${t.fetched || 0}</span> fetched · `
+          + `<span class="fcm-bad">${t.expired || 0}</span> never fetched · `
+          + `<span class="fcm-idle">${t.superseded || 0}</span> superseded · `
+          + `<span class="fcm-bad">${t.no_code || 0}</span> no code extracted`
+          + (sum.fetchRate === null ? '' :
+             `<br><span class="fcm-idle">fetch rate ${sum.fetchRate}% — this is the number to watch</span>`);
+    }
+
+    function renderHistory() {
+        const outcome = document.getElementById('histOutcome').value;
+        const q = (document.getElementById('histSearch').value || '').toLowerCase();
+        const rows = historyRows.filter(r =>
+            (!outcome || r.outcome === outcome) &&
+            (!q || (r.sender || '').toLowerCase().includes(q)
+                || (r.recipient || '').toLowerCase().includes(q)));
+
+        const el = document.getElementById('historyList');
+        if (!rows.length) { el.innerHTML = '<div class="mono">Nothing matches</div>'; return; }
+        el.innerHTML = rows.slice(0, 200).map(r => {
+            const when = new Date(r.receivedAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
+            const cls = r.outcome === 'fetched' ? 'pill-ok'
+                      : r.outcome === 'superseded' ? 'pill-idle' : 'pill-off';
+            return `<div class="hist-row">
+                <span class="mono">${esc(when)}</span>
+                <span class="pill ${cls}">${esc(r.outcome)}</span>
+                <span class="mono">${esc(r.code || '—')}</span>
+                <span class="msg">${esc(r.sender)} → ${esc(r.deviceLabel || r.recipient)} · ${esc(r.message)}</span>
+            </div>`;
+        }).join('');
+    }
+
+    async function deleteHistoryOlder() {
+        const days = parseInt(document.getElementById('histOlderThan').value, 10);
+        if (!(days >= 0)) return;
+        if (!confirm('Delete every archived message older than ' + days + ' days?\n\nThis cannot be undone.')) return;
+        try {
+            const res = await fetch('/api/history/delete', { method: 'POST', headers: authHeaders(),
+                body: JSON.stringify({ olderThanDays: days }) });
+            if (!res.ok) { historyNotice(await describeFailure(res), true); return; }
+            const d = await res.json();
+            historyNotice('Deleted ' + d.deleted + ' entr' + (d.deleted === 1 ? 'y' : 'ies'), false);
+            await loadHistory();
+        } catch (e) { historyNotice('Could not reach the server', true); }
+    }
 
     function notify(msg) {
         const el = document.getElementById('notification');

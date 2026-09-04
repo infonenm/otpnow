@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.24.1
+ * server.js — GetOTP Render Server v4.25.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -40,6 +40,7 @@ const store   = require('./lib/store');
 const otp     = require('./lib/otp');
 const fcm     = require('./lib/fcm');
 const firestore = require('./lib/firestore');
+const history   = require('./lib/history');
 
 // Initialize FCM (silent no-op if FIREBASE_SERVICE_ACCOUNT not set)
 fcm.init();
@@ -52,6 +53,7 @@ fcm.init();
 firestore.init();
 store.loadDurableConfig();
 store.loadIdentity();
+history.start();
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -257,8 +259,10 @@ app.post('/sms', requireApiKey, (req, res) => {
         return res.status(400).json({ error: 'Missing sender or message' });
     }
 
-    const forwarding = store.isForwardingEnabled();
-    if (!forwarding) {
+    // PER DEVICE, not global: a user may have turned their own phones back on
+    // for a bounded window while the global switch is off. Same function the
+    // app is answered with below, so enforcement and instruction cannot differ.
+    if (!store.forwardingFor(deviceId)) {
         console.log(`[server] Declined SMS from ${sender} — forwarding is OFF`);
         return res.json({ success: true, ignored: true, globalForwarding: false });
     }
@@ -311,17 +315,28 @@ app.get('/api/settings', requireApiKey, (req, res) => {
     // Presence, from the poll the app already makes. No new mechanism, no new
     // request — this is what answers "which phones are alive?" on the dashboard.
     if (req.query.deviceId) store.users.touchDevice(req.query.deviceId);
+    const cmds = store.commandsFor(req.query.deviceId);
     res.json({
-        globalForwarding: s.globalForwarding,
-        clearLogTs:       s.clearLogTs,
-        testMessageTs:    s.testMessageTs,
+        // The EFFECTIVE answer for this device, not the raw global flag. The app
+        // is told what to do; it never computes policy (I10).
+        globalForwarding: store.forwardingFor(req.query.deviceId),
+        // Per device: the newer of the broadcast timestamp and this owner's.
+        // RemoteCommands already de-duplicates by timestamp, so targeting
+        // needed no app change at all.
+        clearLogTs:       cmds.clearLogTs,
+        testMessageTs:    cmds.testMessageTs,
         // Third one-shot. The poller is the carrier that survives a phone with
         // no Play Services, so a command that only rode FCM would silently not
         // work on exactly the devices most likely to have missed the SMS.
-        fetchLatestTs:    s.fetchLatestTs,
+        fetchLatestTs:    cmds.fetchLatestTs,
         // Dynamic allowlist. The app enforces it against this PLUS its own
         // compiled-in host, which no remote list can remove.
-        allowedHosts:     store.usersEnabled() ? store.users.getAllowedHosts() : []
+        allowedHosts:     store.usersEnabled() ? store.users.getAllowedHosts() : [],
+        // Which user owns this device, so the app can join that FCM topic and
+        // admin targeting can reach some phones and not others.
+        userId:           (store.usersEnabled() && req.query.deviceId)
+                              ? (store.users.getDevice(req.query.deviceId) || {}).userId || ''
+                              : ''
     });
 });
 
@@ -490,19 +505,36 @@ app.post('/api/toggle', requireToken, (req, res) => {
 });
 
 // Clear forward log on devices
+/**
+ * Who a one-shot command is aimed at.
+ *
+ * A user can only ever command their own phones — the target is their own id
+ * and the body is ignored. An admin may say "all" (the default, which is
+ * exactly today's behaviour) or name one user.
+ */
+function commandTarget(req) {
+    if (req.session.role !== 'admin') return req.session.userId;
+    const t = (req.body || {}).target;
+    if (!t || t === 'all') return null;
+    return store.users.slug(t);
+}
+
+/** Broadcast topic, or one owner's. */
+function topicFor(target) { return target ? 'user_' + target : undefined; }
+
 app.post('/api/clear-log', requireToken, (req, res) => {
-    const ts = Date.now();          // single timestamp for both paths
-    store.triggerClearLog(ts);
-    fcm.send('clear_log', ts);
-    res.json({ success: true });
+    const target = commandTarget(req);
+    const ts = store.triggerClearLog(Date.now(), target);
+    fcm.send('clear_log', ts, topicFor(target));
+    res.json({ success: true, target: target || 'all' });
 });
 
 // Send test message to devices
 app.post('/api/test', requireToken, (req, res) => {
-    const ts = Date.now();          // single timestamp for both paths
-    store.triggerTestMessage(ts);
-    fcm.send('test', ts);
-    res.json({ success: true });
+    const target = commandTarget(req);
+    const ts = store.triggerTestMessage(Date.now(), target);
+    fcm.send('test', ts, topicFor(target));
+    res.json({ success: true, target: target || 'all' });
 });
 
 // Force the device to fetch and forward its newest SMS.
@@ -512,14 +544,55 @@ app.post('/api/test', requireToken, (req, res) => {
 // was force-stopped when the SMS arrived, and nothing on this server can know
 // the message ever existed.
 app.post('/api/fetch-latest', requireToken, (req, res) => {
-    const ts = store.triggerFetchLatest();
-    fcm.send('fetch_latest', ts);
-    res.json({ success: true, fetchLatestTs: ts });
+    const target = commandTarget(req);
+    const ts = store.triggerFetchLatest(Date.now(), target);
+    fcm.send('fetch_latest', ts, topicFor(target));
+    res.json({ success: true, fetchLatestTs: ts, target: target || 'all' });
+});
+
+// ─── Per-user forwarding override ───────────────────────────────
+//
+// A user turning their OWN phones back on while the admin's global switch is
+// off. Any signed-in user may do this for themselves — there is deliberately no
+// per-user bar on it, by Riad's decision.
+app.post('/api/override', usersGate, requireToken, (req, res) => {
+    const { minutes, userId } = req.body || {};
+    // An admin may start one on a user's behalf; a user only for themselves.
+    const target = (req.session.role === 'admin' && userId)
+        ? store.users.slug(userId) : req.session.userId;
+
+    const r = store.startOverride(target, minutes);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+
+    // FCM so their phones hear it now rather than within 30s. Reusing the
+    // enable action: from a device's point of view this IS an enable, and the
+    // server remains the authority on when it ends.
+    fcm.send('enable', Date.now(), 'user_' + target);
+    res.json({ success: true, expiresAt: r.expiresAt, minutes: r.minutes,
+               clamped: r.clamped, ceiling: store.overrideCeilingMinutes() });
+});
+
+app.post('/api/override/cancel', usersGate, requireToken, (req, res) => {
+    const { userId } = req.body || {};
+    const target = (req.session.role === 'admin' && userId)
+        ? store.users.slug(userId) : req.session.userId;
+    store.cancelOverride(target);
+    if (!store.isForwardingEnabled()) fcm.send('disable', Date.now(), 'user_' + target);
+    res.json({ success: true });
+});
+
+app.get('/api/override', usersGate, requireToken, (req, res) => {
+    res.json({
+        ceiling:   store.overrideCeilingMinutes(),
+        mine:      store.overrideRemaining(req.session.userId),
+        all:       req.session.role === 'admin' ? store.listOverrides() : undefined
+    });
 });
 
 // Clear all SMS from server
 app.post('/api/clear-all', requireToken, (req, res) => {
-    store.clearAll();
+    // A user clears only their own. Admin clears everything, as today.
+    store.clearAll(req.session.role === 'admin' ? null : req.session.userId);
     res.json({ success: true });
 });
 
@@ -683,9 +756,81 @@ app.post('/api/register', requireApiKey, (req, res) => {
         success: true, usersEnabled: true,
         deviceId: device.id,
         assigned: !!device.userId,
+        userId:   device.userId || '',
         allowedHosts: store.users.getAllowedHosts()
     });
 });
+
+// ═════════════════════════════════════════════════════════════════
+// HISTORY (admin only)
+// ═════════════════════════════════════════════════════════════════
+//
+// Admin only, by decision. The archive holds full SMS text.
+
+function historyGate(req, res, next) {
+    if (!history.enabled()) {
+        return res.status(404).json({ error: 'History is not enabled' });
+    }
+    next();
+}
+
+app.get('/api/history', historyGate, requireAdmin, asyncRoute(async (req, res) => {
+    const rows = await firestore.queryHistory(history.COLLECTION, {
+        userId: req.query.userId || null,
+        from:   req.query.from   || null,
+        to:     req.query.to     || null,
+        limit:  req.query.limit  || 200
+    });
+    res.json({ messages: rows, stats: history.stats() });
+}));
+
+/**
+ * Daily counts by outcome, for the activity strip.
+ *
+ * Computed from the same rows rather than a separate aggregate collection: at
+ * 5-10 users the volume does not justify one, and an aggregate that can drift
+ * out of step with the data it summarises is a bug waiting to happen.
+ */
+app.get('/api/history/summary', historyGate, requireAdmin, asyncRoute(async (req, res) => {
+    const days = Math.max(1, Math.min(90, parseInt(req.query.days, 10) || 30));
+    const from = Date.now() - days * 86400_000;
+    const rows = await firestore.queryHistory(history.COLLECTION, { from, limit: 500 });
+
+    const byDay = {};
+    for (const r of rows) {
+        const day = new Date(r.receivedAt).toISOString().slice(0, 10);
+        if (!byDay[day]) byDay[day] = { day, total: 0, fetched: 0, expired: 0, superseded: 0, no_code: 0 };
+        byDay[day].total++;
+        if (byDay[day][r.outcome] !== undefined) byDay[day][r.outcome]++;
+    }
+    const totals = rows.reduce((a, r) => {
+        a.total++; if (a[r.outcome] !== undefined) a[r.outcome]++; return a;
+    }, { total: 0, fetched: 0, expired: 0, superseded: 0, no_code: 0 });
+
+    res.json({
+        days: Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day)),
+        totals,
+        // The one number that is this system's health: of the codes it managed
+        // to extract, how many were actually used.
+        fetchRate: totals.total ? Math.round((totals.fetched / totals.total) * 100) : null
+    });
+}));
+
+app.post('/api/history/delete', historyGate, requireAdmin, asyncRoute(async (req, res) => {
+    const { ids, olderThanDays } = req.body || {};
+    if (Array.isArray(ids) && ids.length) {
+        const n = await firestore.deleteHistory(history.COLLECTION, ids.map(String));
+        return res.json({ success: true, deleted: n });
+    }
+    if (olderThanDays !== undefined) {
+        const days = parseInt(olderThanDays, 10);
+        if (!(days >= 0)) return res.status(400).json({ error: 'olderThanDays must be a number' });
+        const n = await firestore.deleteHistoryBefore(history.COLLECTION,
+            Date.now() - days * 86400_000);
+        return res.json({ success: true, deleted: n });
+    }
+    res.status(400).json({ error: 'Give ids or olderThanDays' });
+}));
 
 // Full settings (for dashboard settings panel)
 app.get('/api/full-settings', requireToken, (req, res) => {
@@ -696,8 +841,14 @@ app.get('/api/full-settings', requireToken, (req, res) => {
     // config included so "which source are these filters from, and did my last
     // save actually reach the cloud?" is answerable without reading the logs.
     res.json(Object.assign(store.getSettings(), {
-        fcm:    fcm.getStatus(),
-        config: store.configStatus()
+        fcm:     fcm.getStatus(),
+        config:  store.configStatus(),
+        history: history.stats(),
+        identity: store.usersEnabled()
+            ? Object.assign(store.users.stats(), { overrides: store.listOverrides(),
+                                                   overrideCeiling: store.overrideCeilingMinutes() })
+            : null,
+        me: { userId: req.session.userId, role: req.session.role }
     }));
 });
 
