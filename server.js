@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.26.8
+ * server.js — GetOTP Render Server v4.28.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -10,8 +10,14 @@
  * to 4.5.0 / v4.5 / "v4.6" in three places, which made "which server is
  * actually deployed?" unanswerable from the logs.
  *
- * ZERO external dependencies. No Firebase, no Google Sheets, no Cloudflare.
- * Everything runs in-memory on this single Render service.
+ * DEPENDENCIES: express, and firebase-admin for FCM push and — since 4.23.0 —
+ * Firestore, which holds the durable config, the user table and the SMS
+ * archive. This header said "ZERO external dependencies. No Firebase" for
+ * several releases after that stopped being true.
+ *
+ * Firestore is read at boot and written on change. It is NEVER on the path from
+ * an SMS to the dashboard or from /get to an OTP — test/firestore.test.js
+ * asserts that by counting calls. Everything an OTP touches is in memory.
  *
  * Endpoints:
  *   POST /sms             → Receive SMS from Android app (API key auth)
@@ -154,7 +160,10 @@ app.use((req, res, next) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
     }
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Api-Key');
+    // X-Get-Key was missing while .env.example advertised it as an alternative
+    // to ?key= — harmless for GM_xmlhttpRequest, broken for a browser fetch.
+    res.setHeader('Access-Control-Allow-Headers',
+        'Content-Type, Authorization, X-Api-Key, X-Get-Key');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
@@ -475,13 +484,30 @@ app.post('/api/login', asyncRoute(async (req, res) => {
 // it first — a username is not a secret. Deliberately unauthenticated, because
 // the code IS the authentication, and deliberately not saying whether the user
 // exists, so it cannot be used to enumerate accounts.
-app.post('/api/set-password', (req, res) => {
+let enrollFailures = 0;
+
+app.post('/api/set-password', asyncRoute(async (req, res) => {
     if (!store.usersEnabled()) return res.status(404).json({ error: 'Users are not enabled' });
     const { username, code, password } = req.body || {};
     const r = store.users.setPassword(username, code, password);
-    if (!r.ok) return res.status(400).json({ error: r.error });
+
+    if (!r.ok) {
+        // Same back-off as /api/login, and for the same reason: an enrollment
+        // code is eight characters and grants a real account. This endpoint is
+        // unauthenticated by design — the code IS the authentication — so it was
+        // the one guessable door with nothing in front of it.
+        //
+        // Only a FAILURE is delayed, so a legitimate enrollment is never slowed
+        // however many attempts preceded it.
+        const delay = Math.min(100 * Math.pow(2, enrollFailures), LOGIN_MAX_DELAY_MS);
+        enrollFailures++;
+        console.warn(`[server] Failed enrollment #${enrollFailures} — delaying ${delay}ms`);
+        await new Promise(t => setTimeout(t, delay));
+        return res.status(400).json({ error: r.error });
+    }
+    enrollFailures = 0;
     res.json({ success: true });
-});
+}));
 
 // All current messages
 app.get('/api/messages', requireToken, (req, res) => {
@@ -492,7 +518,7 @@ app.get('/api/messages', requireToken, (req, res) => {
 
 // SSE real-time stream
 app.get('/api/stream', requireToken, (req, res) => {
-    store.addSSEClient(res);
+    store.addSSEClient(res, req.session);
 });
 
 // Toggle forwarding
@@ -506,7 +532,25 @@ app.post('/api/toggle', requireAdmin, (req, res) => {
     if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be boolean' });
     const ts = Date.now();
     store.setGlobalForwarding(enabled);
-    fcm.send(enabled ? 'enable' : 'disable', ts);
+
+    // A GLOBAL "disable" GOES TO EVERY DEVICE, INCLUDING ONES WITH A LIVE
+    // OVERRIDE — and the app's response is to stop handing SMS to the queue at
+    // all, so messages in that window are DROPPED, not delayed. The override is
+    // documented as running its own clock; for up to 30 seconds it did not.
+    //
+    // So when any override is live, the broadcast push is skipped. Every device
+    // still converges: the poller answers with the effective state for THAT
+    // device within 30s, and until then the server declines and stores nothing,
+    // so an ordinary user loses no message either — they simply keep pushing
+    // into a refusal for a little longer.
+    const live = Object.keys(store.listOverrides());
+    if (enabled || live.length === 0) {
+        fcm.send(enabled ? 'enable' : 'disable', ts);
+    } else {
+        console.warn(`[server] Global OFF: skipping the broadcast push because `
+            + `${live.length} override(s) are live (${live.join(', ')}). Devices `
+            + `converge on the 30s poll; the server declines meanwhile.`);
+    }
     res.json({ success: true, globalForwarding: enabled });
 });
 
@@ -704,6 +748,50 @@ app.post('/api/users/:id/purge', usersGate, requireAdmin, (req, res) => {
 
 // ─── Devices ────────────────────────────────────────────────────
 
+// ─── Move phones to a new server ────────────────────────────────
+//
+// The app has understood `set_url` since 4.28.0 and nothing could send it, so
+// the feature existed only in the phone. This is the other half.
+//
+// THE ALLOWLIST IS CHECKED HERE TOO, not only on the phone. The app would refuse
+// a host that is not on the list — correctly — but the operator would see a
+// cheerful "sent" and no phones moving, with no way to tell that from FCM being
+// broken. Refusing here means the mistake is reported where it was made.
+app.post('/api/set-url', usersGate, requireAdmin, (req, res) => {
+    const { url, target } = req.body || {};
+    const raw = String(url || '').trim();
+    if (!/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}/i.test(raw)) {
+        return res.status(400).json({ error: 'Enter a full https:// URL' });
+    }
+    const host = raw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase();
+    const allowed = store.users.getAllowedHosts();
+    if (allowed.length && !allowed.includes(host)) {
+        return res.status(400).json({
+            error: `"${host}" is not on the allowed hosts list, so every phone would `
+                 + `refuse it. Add it under Allowed server hosts first.`
+        });
+    }
+
+    const who = (req.body || {}).target && target !== 'all' ? store.users.slug(target) : null;
+    fcm.send('set_url', Date.now(), who ? 'user_' + who : undefined, { url: raw });
+    console.warn(`[server] set_url pushed: ${raw} -> ${who || 'all devices'}`);
+    res.json({
+        success: true, url: raw, target: who || 'all',
+        // Honest about what was actually achieved: FCM accepted a message.
+        note: 'Pushed. Phones without Play Services, or force-stopped, will not '
+            + 'receive this — change those by hand in the app.'
+    });
+});
+
+// Force a re-read of config and identity from Firestore.
+//
+// The boot read retries on its own, but when a load has been failing you want to
+// be able to say "try now" and watch, rather than wait out a backoff and wonder.
+app.post('/api/reload', requireAdmin, (req, res) => {
+    store.reloadDurable();
+    res.json({ success: true });
+});
+
 app.get('/api/devices', usersGate, requireAdmin, (req, res) => {
     res.json({ devices: store.users.listDevices() });
 });
@@ -804,7 +892,11 @@ app.get('/api/history', historyGate, requireAdmin, asyncRoute(async (req, res) =
 app.get('/api/history/summary', historyGate, requireAdmin, asyncRoute(async (req, res) => {
     const days = Math.max(1, Math.min(90, parseInt(req.query.days, 10) || 30));
     const from = Date.now() - days * 86400_000;
-    const rows = await firestore.queryHistory(history.COLLECTION, { from, limit: 500 });
+    // Firestore caps what one query returns, so this is a sample, not a census
+    // — and it was being presented as totals. Say so rather than quietly
+    // understating a busy month.
+    const LIMIT = 500;
+    const rows = await firestore.queryHistory(history.COLLECTION, { from, limit: LIMIT });
 
     const byDay = {};
     for (const r of rows) {
@@ -820,6 +912,8 @@ app.get('/api/history/summary', historyGate, requireAdmin, asyncRoute(async (req
     res.json({
         days: Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day)),
         totals,
+        truncated: rows.length >= LIMIT,
+        limit: LIMIT,
         // The one number that is this system's health: of the codes it managed
         // to extract, how many were actually used.
         fetchRate: totals.total ? Math.round((totals.fetched / totals.total) * 100) : null
@@ -843,21 +937,32 @@ app.post('/api/history/delete', historyGate, requireAdmin, asyncRoute(async (req
 }));
 
 // Full settings (for dashboard settings panel)
+// Scoped by role. This returned identity.userList — every user id and name —
+// and every user's override, to ANY signed-in caller, while /api/users was
+// admin-only. An inconsistent boundary is a boundary with a hole in it.
 app.get('/api/full-settings', requireToken, (req, res) => {
+    const isAdmin = req.session.role === 'admin';
     // fcm included so "is push actually reaching my phones?" is answerable.
     // send() is fire-and-forget by design, so without this a broken service
     // account is completely silent — the dashboard toggle still returns 200 and
     // the device just never hears about it.
     // config included so "which source are these filters from, and did my last
     // save actually reach the cloud?" is answerable without reading the logs.
-    res.json(Object.assign(store.getSettings(), {
-        fcm:     fcm.getStatus(),
-        config:  store.configStatus(),
-        history: history.stats(),
-        identity: store.usersEnabled()
+    const settings = store.getSettings();
+    if (!isAdmin) { delete settings.filters; }
+    res.json(Object.assign(settings, {
+        fcm:     isAdmin ? fcm.getStatus() : null,
+        config:  isAdmin ? store.configStatus() : null,
+        history: isAdmin ? history.stats() : null,
+        identity: !store.usersEnabled() ? null : (isAdmin
             ? Object.assign(store.users.stats(), { overrides: store.listOverrides(),
                                                    overrideCeiling: store.overrideCeilingMinutes() })
-            : null,
+            // A user needs exactly two things from here: how long an override may
+            // run, and whether THEIRS is running. Not the roster.
+            : { overrideCeiling: store.overrideCeilingMinutes(),
+                overrides: store.overrideRemaining(req.session.userId) > 0
+                    ? { [req.session.userId]: { remainingMs: store.overrideRemaining(req.session.userId) } }
+                    : {} }),
         me: { userId: req.session.userId, role: req.session.role }
     }));
 });

@@ -226,15 +226,31 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
     res = await req('POST', '/api/login', { body: { username: 'rahim', password: 'rahim-password' } });
     assert.strictEqual(res.status, 401, 'and cannot log back in');
 
-    // Their DEVICE keeps forwarding, to admin.
+    // THEIR PHONES STOP FORWARDING.
+    //
+    // This reverses the earlier behaviour, on the owner's instruction:
+    // "if an user is not active ... his message will not be forwarded".
+    // Deactivating is how you take someone out of the system, and leaving their
+    // phones pushing SMS into the admin's view is not what that means to the
+    // person doing it.
     res = await req('POST', '/sms', { apiKey: 'test-key', body: {
         sender: 'IVAC', recipient: '01722222222', message: 'Your OTP is 444444',
         arrivedAt: Date.now(), deviceId: devA } });
-    assert.strictEqual(res.status, 200, "a deactivated user's phone keeps forwarding");
+    assert.strictEqual(res.status, 200,
+        'declined with 200, not an error — a 4xx would put it in the app retry queue');
+    assert.strictEqual(res.body.ignored, true,
+        "a deactivated user's phones must stop forwarding");
     let filed = store.getSmsFor(users.ADMIN_ID).find(m => m.message.includes('444444'));
-    assert.ok(filed, 'and the message is stored');
-    assert.strictEqual(filed.userId, users.ADMIN_ID,
-        'filed to admin, so nothing stops arriving while you sort out the phone');
+    assert.ok(!filed, 'and nothing is stored for them at all');
+
+    // An UNASSIGNED device is unaffected — a new phone must work from the moment
+    // it is installed, before anyone has had the chance to assign it.
+    const devFree = (await req('POST', '/api/register',
+        { apiKey: 'test-key', body: { model: 'Nokia G21' } })).body.deviceId;
+    res = await req('POST', '/sms', { apiKey: 'test-key', body: {
+        sender: 'IVAC', recipient: '01766660000', message: 'Your OTP is 666000',
+        deviceId: devFree } });
+    assert.ok(!res.body.ignored, 'an unassigned device still forwards');
 
     // Reactivation restores access.
     await req('POST', '/api/users/rahim/active', { token: adminToken, body: { active: true } });
@@ -341,6 +357,54 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
         body: { model: 'Realme C55', claimedUser: 'sabbir' } });
     assert.strictEqual(r.body.claimStatus, 'inactive_user', 'a deactivated account is reported');
     assert.strictEqual(r.body.userId, '', 'and does not become an owner');
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // REVIEW FINDINGS — each of these was a real bug, so each gets an assertion.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // #11 The code is read off a screen and typed by hand; the dash is
+    // formatting, not part of the secret.
+    await req('POST', '/api/users', { token: adminToken, body: { name: 'Dashless' } });
+    const dashCode = (await req('POST', '/api/users/dashless/reissue',
+        { token: adminToken })).body.enrollCode;
+    res = await req('POST', '/api/set-password', { body: {
+        username: 'dashless', code: dashCode.replace('-', '').toLowerCase(),
+        password: 'password-1234' } });
+    assert.strictEqual(res.status, 200,
+        'the enrollment code must accept no dash and any case — rejecting "L8SUY5ZQ" '
+        + 'teaches only that the system is fussy');
+
+    // #3 Purging must clear the CLAIM as well as the assignment, or the device
+    // is silenced permanently by a claim pointing at a user that is gone.
+    await req('POST', '/api/users', { token: adminToken, body: { name: 'Doomed' } });
+    const devDoom = (await req('POST', '/api/register', { apiKey: 'test-key',
+        body: { model: 'Vivo Y21', claimedUser: 'doomed' } })).body.deviceId;
+    res = await req('POST', '/sms', { apiKey: 'test-key', body: {
+        sender: 'IVAC', recipient: '01712121212', message: 'Your OTP is 121212',
+        deviceId: devDoom } });
+    assert.ok(!res.body.ignored, 'the claimed device forwards before the purge');
+
+    await req('POST', '/api/users/doomed/purge', { token: adminToken });
+    res = await req('POST', '/sms', { apiKey: 'test-key', body: {
+        sender: 'IVAC', recipient: '01713131313', message: 'Your OTP is 131313',
+        deviceId: devDoom } });
+    assert.ok(!res.body.ignored,
+        'AND AFTER IT. Purging left claimedUserId pointing at a deleted user, so '
+        + 'forwardingFor() declined every push with nothing on screen to explain it');
+    assert.strictEqual(users.getDevice(devDoom).claimedUserId, null,
+        'the stale claim is cleared, not merely the assignment');
+
+    // #6 The roster is admin business. This endpoint returned every user id,
+    // name and override to any signed-in caller while /api/users was admin-only.
+    const rahim3 = (await req('POST', '/api/login',
+        { body: { username: 'rahim', password: 'rahim-password' } })).body.token;
+    res = await req('GET', '/api/full-settings', { token: rahim3 });
+    assert.strictEqual(res.status, 200, 'a user may still read their own settings');
+    assert.ok(!(res.body.identity && res.body.identity.userList),
+        'but must NOT receive the list of every other user');
+    assert.ok(!res.body.filters, 'nor the OTP filters, which only admin may change');
+    res = await req('GET', '/api/full-settings', { token: adminToken });
+    assert.ok(res.body.identity.userList.length > 0, 'admin still gets everything');
 
     console.log('ok — identity: enrollment codes are one-time, scoping is server-side, '
         + 'deactivation takes every control mid-session, two unresolved SIMs no longer '

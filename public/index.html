@@ -194,9 +194,11 @@
        get wrong last. */
     .menu-btn{
         display:inline-flex;align-items:center;justify-content:center;
-        width:38px;height:36px;padding:0;font-size:20px;line-height:1;
+        width:38px;height:36px;padding:0;font-size:17px;line-height:1;
         letter-spacing:0;font-weight:700;color:var(--text-2);
+        cursor:pointer;   /* stated here too: this is the control people aim at */
     }
+    .menu-btn:hover{color:var(--teal);border-color:var(--teal-line)}
     .menu-btn:hover{color:var(--text-1)}
     .menu-wrap .menu.open + .menu-btn,.menu-btn:focus-visible{outline:none}
     .menu{
@@ -520,9 +522,9 @@
             <button id="forwardToggleBtn" class="forward-toggle-btn disabled admin-only" onclick="toggleForwarding()" disabled>⏳ …</button>
 
             <div class="menu-wrap">
-                <button class="tb-btn menu-btn" onclick="toggleMenu(event)" title="More">⋯</button>
+                <button class="tb-btn menu-btn" onclick="toggleMenu(event)" title="Menu" aria-label="Menu">⚙</button>
                 <div id="barMenu" class="menu">
-                    <button class="menu-item admin-only" onclick="closeMenu();openConfig()">⚙️ Filters</button>
+                    <button class="menu-item admin-only" onclick="closeMenu();openConfig()">🔧 Filters</button>
                     <button class="menu-item admin-only" onclick="closeMenu();openAdmin()">👥 Users</button>
                     <button class="menu-item admin-only" onclick="closeMenu();openHistory()">🕘 History</button>
                     <div class="menu-sep"></div>
@@ -603,6 +605,18 @@
             <div class="config-section"><h4>Allowed server hosts</h4>
                 <div id="hostsList"></div>
                 <div class="config-add"><input id="newHost" placeholder="spare.onrender.com"><button onclick="addHost()">+ Add</button></div>
+            </div>
+            <div class="config-section"><h4>Move phones to another server</h4>
+                <div class="fcm-status" style="margin-bottom:10px">
+                    Pushes the new address to every installed app over FCM — no reinstall.
+                    The host must be on the allowed list above, or the phones will refuse it.
+                    <span class="fcm-idle">A phone with no Play Services, or one an OEM battery
+                    manager has force-stopped, will not receive this and must be changed by hand.</span>
+                </div>
+                <div class="config-add">
+                    <input id="newServerUrl" placeholder="https://spare.onrender.com">
+                    <button onclick="pushServerUrl()">Push to all phones</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1241,6 +1255,15 @@
         refreshFcmStatus();          // re-read: the cached copy is from login time
     }
 
+    /** Ask the server to re-read Firestore now, rather than waiting out a backoff. */
+    async function reloadDurable() {
+        const res = await authFetch('/api/reload', { method: 'POST', headers: authHeaders() });
+        if (!res) return;
+        notify('↻ Re-reading Firestore…');
+        // The read is asynchronous; give it a moment before asking again.
+        setTimeout(refreshFcmStatus, 2500);
+    }
+
     async function refreshFcmStatus() {
         try {
             const res = await fetch('/api/full-settings', { headers: authHeaders() });
@@ -1267,13 +1290,44 @@
      */
     function renderConfigStatus() {
         const el = document.getElementById('configStatus');
-        if (!configStatus) { el.textContent = 'unknown — reload the dashboard'; return; }
+        // A user is no longer sent this — the storage and push diagnostics are
+        // admin business now. Guard, rather than render "undefined".
+        if (!configStatus) { el.textContent = me.role === 'admin'
+            ? 'unknown — reload the dashboard' : 'admin only'; return; }
         const rows = [];
         const src = configStatus.source || 'unknown';
+        const load = configStatus.load || {};
+        const fsOn = (configStatus.firestore || {}).enabled;
+
+        // "NOT LOADED" AND "LOADED, AND EMPTY" ARE DIFFERENT PROBLEMS.
+        //
+        // Three rounds of "my filters and users are gone" were actually the
+        // first one: the boot read failed, nothing was ever written, and
+        // Firestore held the real data the whole time. Showing "running on env
+        // defaults" for both sent us looking for a data-loss bug that did not
+        // exist. Say which, and say it first.
+        const failing = fsOn && ((load.config && !load.config.ok)
+                              || (load.identity && !load.identity.ok));
+        if (failing) {
+            const c = load.config || {}, i = load.identity || {};
+            const bad = [];
+            if (!c.ok) bad.push('config (attempt ' + (c.attempts || 0) + ')');
+            if (!i.ok) bad.push('users (attempt ' + (i.attempts || 0) + ')');
+            rows.push('<span class="fcm-bad">NOT LOADED FROM FIRESTORE — ' + esc(bad.join(', '))
+                + '</span>');
+            rows.push('<span class="fcm-idle">Your saved data is still in Firestore and is not '
+                + 'being overwritten. Retrying automatically.</span>');
+            const err = (c.lastError || i.lastError);
+            if (err) rows.push('<span class="fcm-bad">' + esc(String(err).slice(0, 200)) + '</span>');
+            rows.push('<button class="tb-btn" onclick="reloadDurable()" '
+                + 'style="margin-top:6px">↻ Retry now</button>');
+            el.innerHTML = rows.join('<br>');
+            return;
+        }
 
         rows.push(src === 'env defaults'
             ? '<span class="fcm-bad">running on env defaults</span> — these filters are the '
-              + 'catch-all and will not survive anything. Save your filters to fix this.'
+              + 'catch-all. Nothing is saved yet; save your filters to fix this.'
             : 'source: <span class="fcm-ok">' + esc(src) + '</span>');
 
         const fs = configStatus.firestore || {};
@@ -1303,7 +1357,10 @@
      */
     function renderFcmStatus() {
         const el = document.getElementById('fcmStatus');
-        if (!fcmStatus) { el.textContent = 'unknown — reload the dashboard'; return; }
+        // A user is no longer sent this — the storage and push diagnostics are
+        // admin business now. Guard, rather than render "undefined".
+        if (!fcmStatus) { el.textContent = me.role === 'admin'
+            ? 'unknown — reload the dashboard' : 'admin only'; return; }
 
         const rows = [];
         rows.push(fcmStatus.configured
@@ -1585,7 +1642,7 @@
         const el = document.getElementById('devicesList');
         if (!devices.length) {
             el.innerHTML = '<div class="mono">No devices have registered yet. '
-                + 'Install app 4.28.0 on a phone and it will appear here.</div>';
+                + 'Build and install the current app on a phone and it will appear here.</div>';
             return;
         }
         const opts = ['<option value="">— unassigned —</option>', '<option value="admin">admin</option>']
@@ -1636,6 +1693,26 @@
             await refreshFcmStatus();
             return data;
         } catch (e) { adminNotice('Could not reach the server', true); return null; }
+    }
+
+    /**
+     * Move every phone to a new server address.
+     *
+     * Confirmed explicitly because it is the one action here that can take the
+     * whole fleet somewhere it cannot get back from without touching each
+     * phone — and the compiled-in host is the only anchor that always works.
+     */
+    async function pushServerUrl() {
+        const url = document.getElementById('newServerUrl').value.trim();
+        if (!url) return;
+        if (!confirm('Point EVERY phone at:\n\n' + url
+            + '\n\nThey will stop talking to the current server.\n'
+            + 'Make sure it is running first.')) return;
+        const d = await adminPost('/api/set-url', { url, target: 'all' });
+        if (d) {
+            document.getElementById('newServerUrl').value = '';
+            adminNotice(d.note || 'Pushed', false);
+        }
     }
 
     async function createUser() {
@@ -1801,7 +1878,10 @@
           + `<span class="fcm-idle">${t.superseded || 0}</span> superseded · `
           + `<span class="fcm-bad">${t.no_code || 0}</span> no code extracted`
           + (sum.fetchRate === null ? '' :
-             `<br><span class="fcm-idle">fetch rate ${sum.fetchRate}% — this is the number to watch</span>`);
+             `<br><span class="fcm-idle">fetch rate ${sum.fetchRate}% — this is the number to watch</span>`)
+            + (sum.truncated
+                ? `<br><span class="fcm-bad">showing the most recent ${sum.limit} only — `
+                  + `these totals are a sample, not the whole month</span>` : '');
     }
 
     function renderHistory() {

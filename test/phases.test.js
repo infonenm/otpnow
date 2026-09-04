@@ -321,6 +321,44 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
     assert.ok(!/onclick="[^"]*\$\{esc\(/.test(html),
         'and the row id travels as a data attribute, never inside an inline handler');
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // #1 THE SSE STREAM MUST BE SCOPED.
+    //
+    // /api/messages was scoped and the live stream was not, so a user saw their
+    // own messages on load and then everybody's — full text and codes. The
+    // scoping added in Phase 4 was defeated by the thing that makes the
+    // dashboard live.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+        const rahimTok = (await req('POST', '/api/login',
+            { body: { username: 'rahim', password: 'rahim-password' } })).body.token;
+
+        const seen = [];
+        const streamReq = require('http').get(
+            BASE + '/api/stream?token=' + rahimTok, (r) => {
+                r.on('data', c => seen.push(String(c)));
+            });
+        await new Promise(r => setTimeout(r, 300));
+
+        // A message belonging to KARIM's device.
+        await req('POST', '/sms', { apiKey: 'test-key', body: {
+            sender: 'IVAC', recipient: '01798989898', message: 'Your OTP is 989898',
+            deviceId: devK } });
+        // ...and one belonging to RAHIM's.
+        await req('POST', '/sms', { apiKey: 'test-key', body: {
+            sender: 'IVAC', recipient: '01797979797', message: 'Your OTP is 979797',
+            deviceId: devR } });
+        await new Promise(r => setTimeout(r, 400));
+        streamReq.destroy();
+
+        const stream = seen.join('');
+        assert.ok(stream.includes('979797'),
+            "a user must still receive their OWN messages live");
+        assert.ok(!stream.includes('989898'),
+            "AND MUST NOT RECEIVE ANOTHER USER'S. The stream carried full text and "
+            + 'codes to every logged-in client.');
+    }
+
     console.log('ok — override is per user and server-enforced, targeting needed no app '
         + 'change, and the archive only ever sees finished messages');
     process.exit(0);
