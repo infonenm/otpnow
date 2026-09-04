@@ -250,6 +250,49 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
     res = await req('GET', '/api/history/summary', { token: admin });
     assert.strictEqual(res.status, 200, 'admin can read it');
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // The dashboard must be ABLE to aim. Server-side targeting is useless if the
+    // control offers nothing to aim at — which is exactly what shipped: the
+    // dropdown read `identity.userList` and nothing ever sent it, so an admin
+    // saw "All users" and no other option.
+    // ─────────────────────────────────────────────────────────────────────────
+    res = await req('GET', '/api/full-settings', { token: admin });
+    const list = (res.body.identity || {}).userList;
+    assert.ok(Array.isArray(list), 'the dashboard needs a user list to build the target menu');
+    assert.ok(list.some(u => u.id === 'rahim' && u.name === 'Rahim'),
+        'with ids to send and names to display: ' + JSON.stringify(list));
+
+    await req('POST', '/api/users/karim/active', { token: admin, body: { active: false } });
+    res = await req('GET', '/api/full-settings', { token: admin });
+    assert.ok(!(res.body.identity.userList || []).some(u => u.id === 'karim'),
+        'a deactivated user is not offered as a target — their phones file to admin anyway');
+    await req('POST', '/api/users/karim/active', { token: admin, body: { active: true } });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GLOBAL SETTINGS ARE ADMIN ONLY — enforced, not merely hidden.
+    // A user could previously change the OTP filters and the global forwarding
+    // switch: one person breaking extraction for everybody.
+    // ─────────────────────────────────────────────────────────────────────────
+    for (const [p, body] of [['/api/filters', { filters: [] }],
+                             ['/api/auto-delete', { minutes: 5 }],
+                             ['/api/toggle', { enabled: false }]]) {
+        res = await req('POST', p, { token: rahim2, body });
+        assert.strictEqual(res.status, 403, p + ' must be admin only');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Test messages are never archived — they would depress the fetch rate,
+    // which is the one number meant to say the system is healthy.
+    // ─────────────────────────────────────────────────────────────────────────
+    archived.length = 0;
+    const qBase = history.stats().queued;
+    await req('POST', '/sms', { apiKey: 'test-key', body: {
+        sender: history.TEST_SENDER, recipient: '01777777777',
+        message: 'Test OTP: 123456 (SIM 1)', deviceId: devR } });
+    assert.strictEqual(store.getOtp('01777777777'), '123456', 'a test message still works');
+    assert.strictEqual(history.stats().queued, qBase,
+        'but is NOT queued for the archive — it is something the system invented');
+
     console.log('ok — override is per user and server-enforced, targeting needed no app '
         + 'change, and the archive only ever sees finished messages');
     process.exit(0);

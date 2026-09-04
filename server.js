@@ -496,7 +496,12 @@ app.get('/api/stream', requireToken, (req, res) => {
 });
 
 // Toggle forwarding
-app.post('/api/toggle', requireToken, (req, res) => {
+// GLOBAL settings are ADMIN ONLY, and this is enforced here rather than by
+// hiding a button. Any signed-in user could previously change the OTP filters,
+// the auto-delete window and the global forwarding switch — one user breaking
+// extraction for everybody. A user's own controls (their messages, their
+// override, commands aimed at their own phones) stay open to them.
+app.post('/api/toggle', requireAdmin, (req, res) => {
     const { enabled } = req.body || {};
     if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be boolean' });
     const ts = Date.now();
@@ -598,7 +603,7 @@ app.post('/api/clear-all', requireToken, (req, res) => {
 });
 
 // Update filters
-app.post('/api/filters', requireToken, (req, res) => {
+app.post('/api/filters', requireAdmin, (req, res) => {
     const { filters } = req.body || {};
     if (!Array.isArray(filters)) return res.status(400).json({ error: 'filters must be an array' });
 
@@ -628,7 +633,7 @@ app.post('/api/filters', requireToken, (req, res) => {
 });
 
 // Update auto-delete minutes
-app.post('/api/auto-delete', requireToken, (req, res) => {
+app.post('/api/auto-delete', requireAdmin, (req, res) => {
     const { minutes } = req.body || {};
     if (typeof minutes !== 'number') return res.status(400).json({ error: 'minutes must be a number' });
     store.setAutoDeleteMinutes(minutes);

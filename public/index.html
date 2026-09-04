@@ -7,126 +7,362 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg-deep:#080d18;--bg-panel:#0d1526;--bg-card:#111b2e;--bg-card-h:#172035;
-            --border:rgba(255,255,255,0.07);--border-h:rgba(255,255,255,0.14);
-            --teal:#00d4aa;--teal-dim:rgba(0,212,170,0.12);--teal-glow:rgba(0,212,170,0.25);
-            --amber:#f59e0b;--amber-dim:rgba(245,158,11,0.14);
-            --red:#f87171;--red-dim:rgba(248,113,113,0.14);
-            --blue:#60a5fa;--blue-dim:rgba(96,165,250,0.12);
-            --text-1:#e2e8f0;--text-2:#94a3b8;--text-3:#475569;
-            --mono:'JetBrains Mono',monospace;--sans:'DM Sans',sans-serif;
-            --radius:12px;--radius-lg:18px;
-        }
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:var(--sans);background-color:var(--bg-deep);background-image:radial-gradient(ellipse 80% 50% at 20% -10%,rgba(0,212,170,0.08) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 110%,rgba(96,165,250,0.07) 0%,transparent 55%);min-height:100vh;color:var(--text-1)}
-        .login-container{display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}
-        .login-box{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-lg);padding:48px 40px 40px;width:100%;max-width:380px;box-shadow:0 32px 80px rgba(0,0,0,0.6),0 0 0 1px rgba(0,212,170,0.06)}
-        .login-box h2{text-align:center;margin-bottom:32px;font-size:22px;font-weight:600;letter-spacing:-0.3px}.login-box h2 span{color:var(--teal)}
-        .login-box input{width:100%;padding:13px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);font-family:var(--sans);font-size:15px;margin-bottom:12px;outline:none;transition:border-color .2s,box-shadow .2s}
-        .login-box input:focus{border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-glow)}.login-box input::placeholder{color:var(--text-3)}
-        .login-box button{width:100%;margin-top:8px;padding:14px;background:var(--teal);border:none;border-radius:var(--radius);color:#021a15;font-family:var(--sans);font-size:15px;font-weight:700;cursor:pointer;transition:opacity .2s,transform .15s}
-        .login-box button:hover{opacity:0.9;transform:translateY(-1px)}.error{color:var(--red);text-align:center;margin-top:12px;font-size:13px}
-        .dashboard{display:none;min-height:100vh;padding:16px 20px 28px}.dashboard.active{display:block}
-        .top-bar{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;flex-wrap:wrap;gap:10px}
-        /* Users & Devices, History and the target dropdown were added to a row
-           that was already full, and everything overlapped. Each group wraps as
-           a unit and nothing is allowed to shrink below its label. */
-        .top-bar{flex-direction:column;align-items:stretch;gap:12px}
-        .bar-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-        .bar-spacer{flex:1 1 auto;min-width:0}
-        .top-bar button,.top-bar select{white-space:nowrap}
-        /* The three commands read as one unit, with their target attached. */
-        .cmd-group{display:flex;align-items:center;gap:7px;padding:4px 7px;background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:10px}
-        #commandTarget{max-width:150px}
-        /* Clear All deletes everything and sat one mis-click from Clear Log. */
-        .clear-all-btn.danger{margin-left:6px;border-color:rgba(248,113,113,.4)}
-        @media (max-width:900px){.bar-spacer{display:none}.search-bar{max-width:none}.cmd-group{flex-wrap:wrap}}
-        .logo{font-size:15px;font-weight:700;letter-spacing:-0.2px;color:var(--teal);display:flex;align-items:center;gap:8px;margin-right:8px;white-space:nowrap}.logo-icon{font-size:17px}
-        .status-indicator{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-        .live-indicator{display:inline-flex;align-items:center;gap:6px;background:var(--teal-dim);border:1px solid rgba(0,212,170,0.2);padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;color:var(--teal);letter-spacing:0.3px}
-        .live-dot{width:6px;height:6px;background:var(--teal);border-radius:50%;animation:pulse 2s ease-in-out infinite}
-        .connection-status{padding:5px 12px;border-radius:20px;font-size:12px;font-weight:500;background:rgba(255,255,255,0.06);color:var(--text-2)}
-        .connection-status.connected{background:var(--teal-dim);color:var(--teal);border:1px solid rgba(0,212,170,0.2)}
-        .connection-status.disconnected{background:var(--red-dim);color:var(--red);border:1px solid rgba(248,113,113,0.2)}
-        .search-bar{display:flex;gap:8px;flex:1 1 260px;min-width:220px;max-width:480px}
-        .search-bar input{flex:1;padding:9px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);font-family:var(--sans);font-size:13px;outline:none}
-        .search-bar input:focus{border-color:var(--teal)}.search-bar input::placeholder{color:var(--text-3)}
-        .filter-dropdown{padding:9px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);font-family:var(--sans);font-size:13px;cursor:pointer;outline:none}
-        .tb-btn{padding:8px 14px;border-radius:var(--radius);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;white-space:nowrap;border:1px solid transparent}.tb-btn:hover{transform:translateY(-1px)}
-        .clear-btn{padding:9px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-2);font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;transition:all .18s}.clear-btn:hover{border-color:var(--border-h);color:var(--text-1)}
-        .config-btn{padding:8px 14px;background:var(--blue-dim);border:1px solid rgba(96,165,250,0.25);border-radius:var(--radius);color:var(--blue);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;white-space:nowrap}.config-btn:hover{background:rgba(96,165,250,0.2);transform:translateY(-1px)}
-        .forward-toggle-btn{padding:8px 18px;border-radius:var(--radius);font-family:var(--sans);font-size:13px;font-weight:700;cursor:pointer;transition:all .22s;min-width:160px;text-align:center;border:1px solid transparent;letter-spacing:0.2px}
-        .forward-toggle-btn.enabled{background:rgba(0,212,170,0.15);border-color:rgba(0,212,170,0.35);color:var(--teal);box-shadow:0 0 18px rgba(0,212,170,0.18)}
-        .forward-toggle-btn.disabled{background:var(--red-dim);border-color:rgba(248,113,113,0.35);color:var(--red);box-shadow:0 0 14px rgba(248,113,113,0.15)}
-        .forward-toggle-btn:hover{transform:translateY(-1px)}.forward-toggle-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
-        .clear-log-btn{padding:8px 14px;background:var(--blue-dim);border:1px solid rgba(96,165,250,0.2);border-radius:var(--radius);color:var(--blue);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;white-space:nowrap}
-        .clear-log-btn:hover{background:rgba(96,165,250,0.2);transform:translateY(-1px)}.clear-log-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none}
-        .test-msg-btn{padding:8px 16px;background:rgba(167,139,250,0.18);border:1px solid rgba(167,139,250,0.4);color:#c4b5fd;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
-        .test-msg-btn:hover{background:rgba(167,139,250,0.35);border-color:#a78bfa;color:#fff;transform:translateY(-1px)}.test-msg-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none}
-        .clear-all-btn{padding:8px 14px;background:var(--red-dim);border:1px solid rgba(248,113,113,0.3);border-radius:var(--radius);color:var(--red);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;white-space:nowrap}.clear-all-btn:hover{background:rgba(248,113,113,0.22);transform:translateY(-1px)}
-        .logout-btn{padding:8px 14px;background:transparent;border:1px solid var(--border);border-radius:var(--radius);color:var(--text-2);font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;transition:all .18s}.logout-btn:hover{border-color:var(--red);color:var(--red)}
-        @keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 var(--teal-glow)}50%{opacity:.6;box-shadow:0 0 0 4px transparent}}
-        .grid-container{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:1600px;margin:0 auto}@media(max-width:1024px){.grid-container{grid-template-columns:1fr}}
-        .section{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;min-height:400px}
-        .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border)}
-        .section-title{font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;display:flex;align-items:center;gap:10px;color:var(--text-2)}
-        .count-badge{background:rgba(255,255,255,0.08);border:1px solid var(--border);padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;font-family:var(--mono);color:var(--text-1);letter-spacing:0;text-transform:none}
-        .sms-list{display:flex;flex-direction:column;gap:10px}
-        @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-        .sms-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;transition:background .2s,border-color .2s,box-shadow .2s;animation:slideIn .28s ease-out both;position:relative;overflow:hidden}
-        .sms-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--teal);border-radius:3px 0 0 3px;opacity:0.7}
-        .sms-card.used::before{background:var(--amber);opacity:0.5}.sms-card:hover{background:var(--bg-card-h);border-color:var(--border-h);box-shadow:0 4px 20px rgba(0,0,0,0.3)}.sms-card.used{opacity:0.68}
-        .sms-sender{font-size:12px;font-weight:600;color:var(--teal);margin-bottom:7px;letter-spacing:0.2px}.sms-card.used .sms-sender{color:var(--amber)}
-        .sms-message{color:var(--text-2);font-size:13px;line-height:1.55;margin-bottom:11px}
-        .sms-code{display:inline-flex;align-items:center;gap:8px;background:rgba(0,212,170,0.12);border:1px solid rgba(0,212,170,0.28);color:var(--teal);padding:6px 14px;border-radius:8px;font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:2.5px;margin-bottom:9px}
-        .sms-code.used{background:var(--amber-dim);border-color:rgba(245,158,11,0.28);color:var(--amber)}
-        .sms-time{color:var(--text-3);font-size:11px;font-family:var(--mono);letter-spacing:0.2px}
-        .sms-status{display:inline-block;color:var(--teal);font-size:11px;margin-left:10px;font-family:var(--sans)}.sms-status.used{color:var(--amber)}
-        .sms-lag{color:var(--amber);font-size:11px;margin-left:8px;font-family:var(--sans)}
-        .empty-state{text-align:center;padding:60px 20px;color:var(--text-3)}.empty-state-icon{font-size:42px;margin-bottom:12px;opacity:0.6}.empty-state div:last-child{font-size:13px;letter-spacing:0.2px}
-        .expiry-bar-wrap{height:2px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:10px;overflow:hidden}
-        .expiry-bar{height:100%;border-radius:2px;transition:width 1s linear,background 1s}
-        .expiry-countdown{font-size:10px;font-family:var(--mono);color:var(--text-3);margin-top:4px;letter-spacing:0.3px}.expiry-countdown.urgent{color:var(--red)}
-        @keyframes fadeOut{from{opacity:1;transform:scaleY(1);max-height:300px}to{opacity:0;transform:scaleY(0);max-height:0;padding:0;margin:0}}.sms-card.expiring{animation:fadeOut .6s ease forwards;transform-origin:top;overflow:hidden}
-        .notification{position:fixed;top:20px;right:20px;background:var(--bg-panel);border:1px solid var(--border-h);color:var(--text-1);padding:13px 20px;border-radius:var(--radius);box-shadow:0 16px 40px rgba(0,0,0,0.5);transform:translateY(-12px) translateX(20px);opacity:0;transition:all .28s cubic-bezier(0.34,1.56,0.64,1);z-index:1000;font-size:14px;font-weight:500;max-width:340px}.notification.show{transform:translateY(0) translateX(0);opacity:1}
-        .config-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:900;justify-content:center;align-items:flex-start;padding:40px 20px;overflow-y:auto}.config-overlay.open{display:flex}
-        .config-modal{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-lg);width:100%;max-width:700px;padding:28px 32px;position:relative;box-shadow:0 32px 80px rgba(0,0,0,0.6)}
-        .config-modal h3{font-size:18px;font-weight:700;color:var(--teal);margin-bottom:24px;display:flex;justify-content:space-between;align-items:center}
-        .config-close{background:none;border:none;color:var(--text-3);font-size:22px;cursor:pointer;padding:4px 8px}.config-close:hover{color:var(--text-1)}
-        .config-section{margin-bottom:24px}.config-section h4{font-size:13px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-        .config-row{display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;font-size:13px}
-        .config-row .pattern-text{flex:1;font-family:var(--mono);font-size:12px;color:var(--text-2);word-break:break-all}.config-row .phone-label{font-weight:600;color:var(--teal);min-width:120px;font-size:12px}
-        .config-row .del-btn{background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:2px 6px;border-radius:4px;transition:background .15s}.config-row .del-btn:hover{background:var(--red-dim)}
-        .config-add{display:flex;gap:8px;margin-top:8px}
-        .config-add input{flex:1;padding:9px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-family:var(--mono);font-size:12px;outline:none}
-        .config-add input:focus{border-color:var(--teal)}.config-add input::placeholder{color:var(--text-3)}
-        .config-add button{padding:9px 16px;background:var(--teal-dim);border:1px solid rgba(0,212,170,0.3);border-radius:8px;color:var(--teal);font-weight:600;font-size:12px;cursor:pointer;transition:all .15s;white-space:nowrap}.config-add button:hover{background:rgba(0,212,170,0.2)}
-        .setting-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}.setting-row label{font-size:13px;color:var(--text-2);min-width:160px}
-        .setting-row input[type=number]{width:80px;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-family:var(--mono);font-size:13px;outline:none}.setting-row input:focus{border-color:var(--teal)}
-        .fcm-status{font-family:var(--mono);font-size:12px;line-height:1.7;color:var(--text-2);white-space:pre-wrap;word-break:break-word}
-        .fcm-status .fcm-ok{color:var(--teal)}.fcm-status .fcm-bad{color:var(--red)}.fcm-status .fcm-idle{color:var(--text-3)}
-        .whoami{font-family:var(--mono);font-size:12px;color:var(--text-2);padding:0 6px}
-        .enroll-link{margin-top:14px;font-size:12.5px;color:var(--teal);cursor:pointer;opacity:.85}.enroll-link:hover{opacity:1}
-        .enroll-box{display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}.enroll-box.open{display:block}
-        .admin-row{display:flex;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
-        .admin-row .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .admin-row .mono{font-family:var(--mono);font-size:11.5px;color:var(--text-3)}
-        .admin-row button,.admin-row select{padding:5px 10px;font-size:11.5px;border-radius:7px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-1);cursor:pointer}
-        .admin-row button:hover{border-color:var(--teal)}
-        .pill{font-size:10.5px;padding:2px 7px;border-radius:20px;font-family:var(--mono)}
-        .pill-ok{background:rgba(0,212,170,.13);color:var(--teal)}.pill-off{background:rgba(248,113,113,.13);color:var(--red)}
-        .pill-idle{background:rgba(255,255,255,.06);color:var(--text-3)}
-        .code-box{font-family:var(--mono);font-size:15px;color:var(--teal);background:rgba(0,212,170,.08);border:1px solid rgba(0,212,170,.3);border-radius:8px;padding:10px;margin:8px 0;text-align:center;letter-spacing:2px}
-        .strip{display:flex;gap:2px;align-items:flex-end;height:56px;margin:6px 0 12px}
-        .strip div{flex:1;min-width:2px;background:var(--teal);opacity:.75;border-radius:2px 2px 0 0;cursor:pointer;transition:opacity .12s}
-        .strip div:hover{opacity:1}
-        .hist-row{padding:9px 0;border-bottom:1px solid var(--border);font-size:12.5px;display:flex;gap:10px;align-items:baseline}
-        .hist-row .msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
-        .config-error{display:none;margin:0 0 12px;padding:11px 14px;background:rgba(255,77,77,0.08);border:1px solid rgba(255,77,77,0.35);border-radius:var(--radius);color:var(--red);font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)}.config-error.show{display:block}
-        .save-config-btn{padding:12px 24px;background:var(--teal);border:none;border-radius:var(--radius);color:#021a15;font-weight:700;font-size:14px;cursor:pointer;transition:all .15s;margin-top:8px}.save-config-btn:hover{opacity:0.9;transform:translateY(-1px)}
-    </style>
+    <style>    /* ═══════════════════════════════════════════════════════════════
+       GetOTP dashboard — visual system
+
+       Rewritten as one sheet rather than grown by accretion. Every class
+       name the JavaScript touches is preserved exactly; only the look
+       changes, so nothing had to be re-wired.
+
+       The rules it follows:
+
+       - ONE SCALE. Spacing is 4/8/12/16/24, radii 8/12/16, and three text
+         sizes. The old sheet had eleven different paddings and nine radii,
+         which is most of why it read as untidy however the elements were
+         arranged.
+       - SURFACES, NOT BORDERS. Depth comes from three background levels;
+         borders are hairlines that separate rather than decorate.
+       - COLOUR MEANS SOMETHING. Teal = live and healthy, amber = attention,
+         red = destructive or broken. Nothing is coloured for decoration,
+         so a red thing on this screen is always worth reading.
+       - ONE ACCENT PER VIEW. Exactly one filled button (the forwarding
+         switch). Everything else is quiet until hovered, so the eye lands
+         on the control that matters.
+       ═══════════════════════════════════════════════════════════════ */
+
+    :root{
+        /* Surfaces: page, panel, raised. Depth by level, not by shadow. */
+        --bg:#0a0e1a; --bg-panel:#111726; --bg-card:#161d30; --bg-hover:#1c2439;
+        --border:#222b42; --border-h:#2f3a57;
+
+        --text-1:#e8ecf6; --text-2:#94a0bd; --text-3:#5d6885;
+
+        --teal:#00d4aa; --teal-dim:rgba(0,212,170,0.12); --teal-line:rgba(0,212,170,0.28);
+        --amber:#f5b544; --amber-dim:rgba(245,181,68,0.12);
+        --red:#f87171;   --red-dim:rgba(248,113,113,0.11); --red-line:rgba(248,113,113,0.32);
+
+        --radius:12px; --radius-sm:8px; --radius-lg:16px;
+        --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+        --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+        --shadow:0 8px 32px rgba(0,0,0,0.4);
+    }
+
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{
+        background:var(--bg);
+        /* Two very soft radial washes stop a flat dark page looking dead.
+           Fixed, so they do not move with content. */
+        background-image:
+            radial-gradient(900px 500px at 12% -8%, rgba(0,212,170,0.05), transparent 60%),
+            radial-gradient(700px 400px at 92% 0%, rgba(99,102,241,0.05), transparent 55%);
+        background-attachment:fixed;
+        color:var(--text-1); font-family:var(--sans);
+        font-size:14px; line-height:1.5; min-height:100vh;
+        -webkit-font-smoothing:antialiased;
+    }
+
+    /* ── Login ──────────────────────────────────────────────── */
+    .login-container{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+    .login-box{
+        width:100%;max-width:380px;background:var(--bg-panel);
+        border:1px solid var(--border);border-radius:var(--radius-lg);
+        padding:32px;box-shadow:var(--shadow);
+    }
+    .login-box h2{font-size:22px;font-weight:700;margin-bottom:24px;letter-spacing:-0.02em}
+    .login-box h2 span{color:var(--teal)}
+    .login-box input{
+        width:100%;padding:12px 14px;margin-bottom:10px;
+        background:var(--bg-card);border:1px solid var(--border);
+        border-radius:var(--radius-sm);color:var(--text-1);font-size:14px;
+        font-family:var(--sans);outline:none;transition:border-color .15s;
+    }
+    .login-box input:focus{border-color:var(--teal-line)}
+    .login-box input::placeholder{color:var(--text-3)}
+    .login-box button{
+        width:100%;padding:12px;margin-top:6px;background:var(--teal);border:none;
+        border-radius:var(--radius-sm);color:#04231c;font-weight:700;font-size:14px;
+        cursor:pointer;transition:opacity .15s;font-family:var(--sans);
+    }
+    .login-box button:hover{opacity:.9}
+    .error{color:var(--red);font-size:12.5px;margin-top:10px;min-height:16px}
+    .enroll-link{margin-top:18px;font-size:12.5px;color:var(--teal);cursor:pointer;opacity:.85}
+    .enroll-link:hover{opacity:1}
+    .enroll-box{display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
+    .enroll-box.open{display:block}
+
+    /* ── Shell ──────────────────────────────────────────────── */
+    .dashboard{display:none;max-width:1600px;margin:0 auto;padding:20px}
+    .dashboard.active{display:block}
+
+    /* Top bar: two rows, grouped by what things do. Row 1 is state you
+       READ, row 2 is actions you TAKE. Sticky, because the forwarding
+       switch and the connection light must never scroll away. */
+    .top-bar{
+        position:sticky;top:0;z-index:50;
+        background:rgba(17,23,38,0.86);backdrop-filter:blur(14px);
+        border:1px solid var(--border);border-radius:var(--radius-lg);
+        padding:14px 18px;margin-bottom:20px;
+        display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow);
+    }
+    .bar-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .bar-spacer{flex:1 1 auto;min-width:0}
+    .bar-row + .bar-row{padding-top:12px;border-top:1px solid var(--border)}
+
+    .logo{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800;letter-spacing:-0.02em}
+    .logo-icon{font-size:17px}
+    .whoami{
+        font-family:var(--mono);font-size:11px;color:var(--text-2);
+        background:var(--bg-card);border:1px solid var(--border);
+        padding:4px 9px;border-radius:20px;
+    }
+
+    .live-indicator{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-2)}
+    .live-dot{width:7px;height:7px;border-radius:50%;background:var(--teal);animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+    .connection-status{font-size:11.5px;padding:4px 10px;border-radius:20px;font-weight:600}
+    .connection-status.connected{background:var(--teal-dim);color:var(--teal)}
+    .connection-status.disconnected{background:var(--red-dim);color:var(--red)}
+
+    /* ── Buttons ────────────────────────────────────────────────
+       One shared shape. Quiet by default; the accent is reserved for the
+       forwarding switch so exactly one control asks for attention. */
+    .config-btn,.clear-btn,.clear-log-btn,.test-msg-btn,.logout-btn,.clear-all-btn,.tb-btn{
+        padding:8px 13px;background:var(--bg-card);border:1px solid var(--border);
+        border-radius:var(--radius-sm);color:var(--text-1);font-size:12.5px;font-weight:600;
+        cursor:pointer;transition:background .15s,border-color .15s,color .15s;
+        font-family:var(--sans);white-space:nowrap;
+    }
+    .config-btn:hover,.clear-btn:hover,.clear-log-btn:hover,
+    .test-msg-btn:hover,.logout-btn:hover,.tb-btn:hover{
+        background:var(--bg-hover);border-color:var(--border-h);
+    }
+    .clear-all-btn{color:var(--red);border-color:var(--red-line);background:var(--red-dim)}
+    .clear-all-btn:hover{background:rgba(248,113,113,0.18)}
+    .clear-all-btn.danger{margin-left:4px}
+    .logout-btn{color:var(--text-2)}
+
+    /* The only filled control on the page. */
+    .forward-toggle-btn{
+        padding:8px 15px;border-radius:var(--radius-sm);font-size:12.5px;font-weight:700;
+        cursor:pointer;border:1px solid transparent;transition:all .15s;font-family:var(--sans);
+    }
+    .forward-toggle-btn.enabled{background:var(--teal);color:#04231c}
+    .forward-toggle-btn.enabled:hover{opacity:.9}
+    .forward-toggle-btn.disabled{background:var(--red-dim);color:var(--red);border-color:var(--red-line)}
+    .forward-toggle-btn:disabled{opacity:.55;cursor:default}
+
+    .search-bar{display:flex;gap:8px;flex:1 1 300px;min-width:220px;max-width:520px}
+    .search-bar input,.filter-dropdown{
+        padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);
+        border-radius:var(--radius-sm);color:var(--text-1);font-size:12.5px;
+        outline:none;font-family:var(--sans);transition:border-color .15s;
+    }
+    .search-bar input{flex:1;min-width:0}
+    .search-bar input:focus,.filter-dropdown:focus{border-color:var(--teal-line)}
+    .search-bar input::placeholder{color:var(--text-3)}
+    .filter-dropdown{cursor:pointer;max-width:170px}
+
+    /* The three one-shot commands read as one unit, with the target they
+       are scoped to attached rather than floating beside unrelated things. */
+    .cmd-group{
+        display:flex;align-items:center;gap:6px;padding:4px 6px;
+        background:rgba(255,255,255,0.02);border:1px solid var(--border);
+        border-radius:var(--radius);
+    }
+    #commandTarget{max-width:150px}
+
+    /* ── Message columns ────────────────────────────────────── */
+    .grid-container{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+    .section{
+        background:var(--bg-panel);border:1px solid var(--border);
+        border-radius:var(--radius-lg);overflow:hidden;
+    }
+    .section-header{
+        display:flex;align-items:center;gap:10px;
+        padding:14px 18px;border-bottom:1px solid var(--border);
+        background:rgba(255,255,255,0.015);
+    }
+    .section-title{font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-2)}
+    .count-badge{
+        background:var(--bg-card);border:1px solid var(--border);color:var(--text-2);
+        font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;font-family:var(--mono);
+    }
+    .sms-list{padding:12px;max-height:calc(100vh - 220px);overflow-y:auto}
+    .sms-list::-webkit-scrollbar{width:8px}
+    .sms-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+    .sms-list::-webkit-scrollbar-track{background:transparent}
+
+    /* A card carries its state on the LEFT EDGE — pending is teal, used is
+       muted. Scannable down the column without reading any text. */
+    .sms-card{
+        background:var(--bg-card);border:1px solid var(--border);
+        border-left:3px solid var(--teal);
+        border-radius:var(--radius);padding:13px 15px;margin-bottom:10px;
+        transition:border-color .15s,transform .15s,opacity .4s;
+    }
+    .sms-card:hover{border-color:var(--border-h);transform:translateX(2px)}
+    .sms-card.used{border-left-color:var(--text-3);opacity:.62}
+    .sms-card.expiring{opacity:0;transform:translateX(-12px)}
+    .sms-sender{font-size:12px;font-weight:700;color:var(--teal);margin-bottom:6px;letter-spacing:-0.01em}
+    .sms-card.used .sms-sender{color:var(--text-2)}
+    .sms-message{font-size:13px;color:var(--text-1);line-height:1.55;word-break:break-word}
+    .sms-code{
+        display:inline-flex;align-items:center;gap:8px;margin-top:10px;
+        font-family:var(--mono);font-size:19px;font-weight:700;letter-spacing:0.14em;
+        color:var(--teal);background:var(--teal-dim);border:1px solid var(--teal-line);
+        border-radius:var(--radius-sm);padding:7px 14px;transition:background .15s;
+    }
+    .sms-code:hover{background:rgba(0,212,170,0.2)}
+    .sms-code.used{color:var(--text-2);background:rgba(255,255,255,0.04);border-color:var(--border)}
+    .sms-time{font-size:11px;color:var(--text-3);margin-top:9px;font-family:var(--mono)}
+    .sms-lag{color:var(--amber)}
+    .sms-status{font-weight:600;color:var(--teal)}
+    .sms-status.used{color:var(--text-3)}
+    .expiry-bar-wrap{height:3px;background:var(--border);border-radius:2px;margin-top:10px;overflow:hidden}
+    .expiry-bar{height:100%;border-radius:2px;transition:width 1s linear,background .4s}
+    .expiry-countdown{font-size:10.5px;color:var(--text-3);margin-top:5px;font-family:var(--mono)}
+    .expiry-countdown.urgent{color:var(--red)}
+    .empty-state{text-align:center;padding:56px 20px;color:var(--text-3)}
+    .empty-state-icon{font-size:34px;margin-bottom:10px;opacity:.55}
+
+    /* ── Modals ─────────────────────────────────────────────── */
+    .config-overlay{
+        display:none;position:fixed;inset:0;background:rgba(4,7,14,0.72);
+        backdrop-filter:blur(3px);z-index:900;
+        justify-content:center;align-items:flex-start;padding:40px 20px;overflow-y:auto;
+    }
+    .config-overlay.open{display:flex}
+    .config-modal{
+        width:100%;max-width:680px;background:var(--bg-panel);
+        border:1px solid var(--border-h);border-radius:var(--radius-lg);
+        padding:26px;box-shadow:var(--shadow);
+    }
+    .config-modal h3{
+        display:flex;align-items:center;justify-content:space-between;
+        font-size:17px;font-weight:700;margin-bottom:22px;letter-spacing:-0.02em;
+    }
+    .config-close{
+        background:none;border:none;color:var(--text-3);font-size:20px;
+        cursor:pointer;line-height:1;padding:2px 6px;border-radius:6px;transition:all .15s;
+    }
+    .config-close:hover{color:var(--text-1);background:var(--bg-card)}
+    .config-section{margin-bottom:26px}
+    .config-section h4{
+        font-size:10.5px;font-weight:700;color:var(--text-2);text-transform:uppercase;
+        letter-spacing:0.1em;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);
+    }
+    .config-row{
+        display:flex;align-items:center;gap:10px;padding:9px 11px;margin-bottom:6px;
+        background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);
+    }
+    .pattern-text{flex:1;font-family:var(--mono);font-size:12px;color:var(--text-1);word-break:break-all}
+    .phone-label{font-family:var(--mono);font-size:11.5px;color:var(--teal);min-width:88px}
+    .del-btn{
+        background:none;border:none;color:var(--text-3);cursor:pointer;font-size:14px;
+        padding:2px 6px;border-radius:6px;transition:all .15s;
+    }
+    .del-btn:hover{color:var(--red);background:var(--red-dim)}
+    .config-add{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+    .config-add input,.config-add select{
+        flex:1;min-width:130px;padding:9px 12px;background:var(--bg-card);
+        border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-1);
+        font-family:var(--mono);font-size:12px;outline:none;transition:border-color .15s;
+    }
+    .config-add input:focus,.config-add select:focus{border-color:var(--teal-line)}
+    .config-add input::placeholder{color:var(--text-3)}
+    .config-add button{
+        padding:9px 16px;background:var(--teal-dim);border:1px solid var(--teal-line);
+        border-radius:var(--radius-sm);color:var(--teal);font-weight:700;font-size:12px;
+        cursor:pointer;transition:background .15s;white-space:nowrap;font-family:var(--sans);
+    }
+    .config-add button:hover{background:rgba(0,212,170,0.2)}
+    .setting-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0}
+    .setting-row label{font-size:13px;color:var(--text-2)}
+    .setting-row input{
+        width:110px;padding:9px 12px;background:var(--bg-card);border:1px solid var(--border);
+        border-radius:var(--radius-sm);color:var(--text-1);font-family:var(--mono);
+        font-size:12.5px;outline:none;
+    }
+    .save-config-btn{
+        width:100%;padding:12px;background:var(--teal);border:none;border-radius:var(--radius-sm);
+        color:#04231c;font-weight:700;font-size:13.5px;cursor:pointer;transition:opacity .15s;
+        font-family:var(--sans);
+    }
+    .save-config-btn:hover{opacity:.9}
+
+    /* Status blocks — FCM health, config storage, history totals. */
+    .fcm-status{font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--text-2);word-break:break-word}
+    .fcm-status .fcm-ok{color:var(--teal)}
+    .fcm-status .fcm-bad{color:var(--red)}
+    .fcm-status .fcm-idle{color:var(--text-3)}
+    .config-error{
+        display:none;margin:0 0 14px;padding:12px 14px;background:var(--red-dim);
+        border:1px solid var(--red-line);border-radius:var(--radius-sm);color:var(--red);
+        font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;font-family:var(--mono);
+    }
+    .config-error.show{display:block}
+
+    /* ── Users, devices, history rows ───────────────────────── */
+    .admin-row{
+        display:flex;gap:8px;align-items:center;padding:10px 11px;margin-bottom:6px;
+        background:var(--bg-card);border:1px solid var(--border);
+        border-radius:var(--radius-sm);font-size:13px;flex-wrap:wrap;
+    }
+    .admin-row .grow{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .admin-row .mono{font-family:var(--mono);font-size:11px;color:var(--text-3)}
+    .admin-row button,.admin-row select{
+        padding:5px 10px;font-size:11.5px;border-radius:6px;background:var(--bg-panel);
+        border:1px solid var(--border);color:var(--text-1);cursor:pointer;
+        font-family:var(--sans);transition:border-color .15s;
+    }
+    .admin-row button:hover{border-color:var(--teal-line);color:var(--teal)}
+    .pill{font-size:10.5px;padding:3px 9px;border-radius:20px;font-family:var(--mono);font-weight:600}
+    .pill-ok{background:var(--teal-dim);color:var(--teal)}
+    .pill-off{background:var(--red-dim);color:var(--red)}
+    .pill-idle{background:rgba(255,255,255,0.05);color:var(--text-3)}
+    .code-box{
+        font-family:var(--mono);font-size:15px;color:var(--teal);background:var(--teal-dim);
+        border:1px dashed var(--teal-line);border-radius:var(--radius-sm);
+        padding:12px;margin:10px 0;text-align:center;letter-spacing:0.1em;
+    }
+    .strip{display:flex;gap:2px;align-items:flex-end;height:64px;margin:8px 0 14px}
+    .strip div{
+        flex:1;min-width:2px;background:var(--teal);opacity:.6;
+        border-radius:3px 3px 0 0;cursor:pointer;transition:opacity .12s;
+    }
+    .strip div:hover{opacity:1}
+    .hist-row{
+        display:flex;gap:10px;align-items:baseline;padding:10px 11px;margin-bottom:5px;
+        background:var(--bg-card);border:1px solid var(--border);
+        border-radius:var(--radius-sm);font-size:12.5px;
+    }
+    .hist-row .mono{font-family:var(--mono);font-size:11px;color:var(--text-3)}
+    .hist-row .msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
+
+    /* ── Toast ──────────────────────────────────────────────── */
+    .notification{
+        position:fixed;top:20px;right:20px;background:var(--bg-panel);
+        border:1px solid var(--border-h);color:var(--text-1);padding:13px 18px;
+        border-radius:var(--radius);box-shadow:var(--shadow);
+        transform:translateY(-12px);opacity:0;
+        transition:all .28s cubic-bezier(0.34,1.56,0.64,1);
+        z-index:1000;font-size:13.5px;font-weight:500;max-width:340px;
+    }
+    .notification.show{transform:translateY(0);opacity:1}
+
+    /* ── Responsive ─────────────────────────────────────────── */
+    @media (max-width:1100px){
+        .grid-container{grid-template-columns:1fr}
+        .sms-list{max-height:none}
+    }
+    @media (max-width:820px){
+        .dashboard{padding:12px}
+        .bar-spacer{display:none}
+        .search-bar{max-width:none;flex-basis:100%}
+        .cmd-group{flex-wrap:wrap}
+        .top-bar{position:static}
+    }
+</style>
 </head>
 <body>
     <!-- LOGIN -->
@@ -179,7 +415,7 @@
                 <div class="bar-spacer"></div>
                 <button id="overrideBtn" class="config-btn user-only" onclick="startOverride()" style="display:none"></button>
                 <button id="forwardToggleBtn" class="forward-toggle-btn disabled" onclick="toggleForwarding()" disabled>⏳ Loading...</button>
-                <button class="config-btn" onclick="openConfig()">⚙️ Settings</button>
+                <button class="config-btn admin-only" onclick="openConfig()">⚙️ Settings</button>
                 <button class="config-btn admin-only" id="adminBtn" onclick="openAdmin()">👥 Users</button>
                 <button class="config-btn admin-only" id="historyBtn" onclick="openHistory()">🕘 History</button>
                 <button class="logout-btn" onclick="doLogout()">Logout</button>
@@ -551,14 +787,24 @@
         renderOverrideButton();
     }
 
+    /**
+     * Populate the target dropdown from the live user list.
+     *
+     * Keeps the current selection across a refresh: re-rendering this while an
+     * admin has aimed at one user and is about to press Test would silently
+     * reset the aim to "All users" and wake every phone.
+     */
     function fillTargetDropdown() {
         const sel = document.getElementById('commandTarget');
         if (!sel || !identity) return;
         const current = sel.value;
-        const names = (identity.userList || []).slice();
+        const list = identity.userList || [];
         sel.innerHTML = '<option value="all">All users</option>'
-            + names.map(u => `<option value="${esc(u)}">${esc(u)}</option>`).join('');
-        sel.value = current || 'all';
+            + list.map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('');
+        sel.value = list.some(u => u.id === current) ? current : 'all';
+        // With no users there is nothing to aim at, and an "All users" dropdown
+        // offering only "All users" is clutter.
+        sel.style.display = list.length ? '' : 'none';
     }
 
     /**
@@ -819,6 +1065,7 @@
             renderFcmStatus();
             renderConfigStatus();
             renderOverrideButton();
+            if (me.role === 'admin') fillTargetDropdown();
         } catch (e) { /* the cached value stays on screen */ }
     }
 
@@ -1195,6 +1442,9 @@
             const data = await res.json();
             if (okMsg) adminNotice(okMsg, false);
             await loadAdmin();
+            // A user was just created, renamed or deactivated — the target
+            // dropdown is stale until this runs.
+            await refreshFcmStatus();
             return data;
         } catch (e) { adminNotice('Could not reach the server', true); return null; }
     }
