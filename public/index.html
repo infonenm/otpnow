@@ -30,6 +30,19 @@
         .login-box button:hover{opacity:0.9;transform:translateY(-1px)}.error{color:var(--red);text-align:center;margin-top:12px;font-size:13px}
         .dashboard{display:none;min-height:100vh;padding:16px 20px 28px}.dashboard.active{display:block}
         .top-bar{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+        /* Users & Devices, History and the target dropdown were added to a row
+           that was already full, and everything overlapped. Each group wraps as
+           a unit and nothing is allowed to shrink below its label. */
+        .top-bar{flex-direction:column;align-items:stretch;gap:12px}
+        .bar-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+        .bar-spacer{flex:1 1 auto;min-width:0}
+        .top-bar button,.top-bar select{white-space:nowrap}
+        /* The three commands read as one unit, with their target attached. */
+        .cmd-group{display:flex;align-items:center;gap:7px;padding:4px 7px;background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:10px}
+        #commandTarget{max-width:150px}
+        /* Clear All deletes everything and sat one mis-click from Clear Log. */
+        .clear-all-btn.danger{margin-left:6px;border-color:rgba(248,113,113,.4)}
+        @media (max-width:900px){.bar-spacer{display:none}.search-bar{max-width:none}.cmd-group{flex-wrap:wrap}}
         .logo{font-size:15px;font-weight:700;letter-spacing:-0.2px;color:var(--teal);display:flex;align-items:center;gap:8px;margin-right:8px;white-space:nowrap}.logo-icon{font-size:17px}
         .status-indicator{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
         .live-indicator{display:inline-flex;align-items:center;gap:6px;background:var(--teal-dim);border:1px solid rgba(0,212,170,0.2);padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;color:var(--teal);letter-spacing:0.3px}
@@ -37,7 +50,7 @@
         .connection-status{padding:5px 12px;border-radius:20px;font-size:12px;font-weight:500;background:rgba(255,255,255,0.06);color:var(--text-2)}
         .connection-status.connected{background:var(--teal-dim);color:var(--teal);border:1px solid rgba(0,212,170,0.2)}
         .connection-status.disconnected{background:var(--red-dim);color:var(--red);border:1px solid rgba(248,113,113,0.2)}
-        .search-bar{display:flex;gap:8px;flex:1;min-width:220px;max-width:480px}
+        .search-bar{display:flex;gap:8px;flex:1 1 260px;min-width:220px;max-width:480px}
         .search-bar input{flex:1;padding:9px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);font-family:var(--sans);font-size:13px;outline:none}
         .search-bar input:focus{border-color:var(--teal)}.search-bar input::placeholder{color:var(--text-3)}
         .filter-dropdown{padding:9px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-1);font-family:var(--sans);font-size:13px;cursor:pointer;outline:none}
@@ -139,35 +152,61 @@
 
     <!-- DASHBOARD -->
     <div id="dashboard" class="dashboard">
+        <!-- ═══════════════════════════════════════════════════════
+             TWO ROWS, GROUPED BY WHAT THINGS DO.
+
+             This was one row. Four controls were added to it over three
+             releases (Users & Devices, History, the target dropdown, the
+             override button) and it stopped being readable — the search box
+             overlapped Clear All and the whole thing ran off the edge.
+
+             Row 1: who and what state — identity, connection, the forwarding
+                    switch. Things you READ.
+             Row 2: search, and the buttons that DO something, with the target
+                    dropdown sitting next to the three commands it applies to
+                    rather than floating between unrelated controls.
+
+             Destructive actions (Clear All) are visually separated from the
+             rest, because they sat next to Clear Log and the two are one
+             mis-click apart with very different consequences.
+             ═══════════════════════════════════════════════════════ -->
         <div class="top-bar">
-            <div class="logo"><span class="logo-icon">📱</span> GetOTP</div>
-            <div class="status-indicator">
+            <div class="bar-row">
+                <div class="logo"><span class="logo-icon">📱</span> GetOTP</div>
                 <div class="live-indicator"><div class="live-dot"></div> Live</div>
                 <div id="connectionStatus" class="connection-status">Connecting...</div>
                 <span id="whoami" class="whoami"></span>
-                <button class="config-btn" onclick="openConfig()">⚙️ Filters & Settings</button>
-                <button class="config-btn admin-only" id="adminBtn" onclick="openAdmin()">👥 Users &amp; Devices</button>
-                <button class="config-btn admin-only" id="historyBtn" onclick="openHistory()">🕘 History</button>
-                <button id="forwardToggleBtn" class="forward-toggle-btn disabled" onclick="toggleForwarding()" disabled>⏳ Loading...</button>
+                <div class="bar-spacer"></div>
                 <button id="overrideBtn" class="config-btn user-only" onclick="startOverride()" style="display:none"></button>
+                <button id="forwardToggleBtn" class="forward-toggle-btn disabled" onclick="toggleForwarding()" disabled>⏳ Loading...</button>
+                <button class="config-btn" onclick="openConfig()">⚙️ Settings</button>
+                <button class="config-btn admin-only" id="adminBtn" onclick="openAdmin()">👥 Users</button>
+                <button class="config-btn admin-only" id="historyBtn" onclick="openHistory()">🕘 History</button>
+                <button class="logout-btn" onclick="doLogout()">Logout</button>
             </div>
-            <div class="search-bar">
-                <input type="text" id="searchInput" placeholder="🔍 Filter by number..." oninput="filterMessages()">
-                <select class="filter-dropdown" id="numberFilter" onchange="filterMessages()">
-                    <option value="">All Numbers</option>
-                </select>
-                <button class="clear-btn" onclick="clearFilters()">Clear</button>
+
+            <div class="bar-row">
+                <div class="search-bar">
+                    <input type="text" id="searchInput" placeholder="🔍 Filter by number..." oninput="filterMessages()">
+                    <select class="filter-dropdown" id="numberFilter" onchange="filterMessages()">
+                        <option value="">All Numbers</option>
+                    </select>
+                    <button class="clear-btn" onclick="clearFilters()">Clear</button>
+                </div>
+                <div class="bar-spacer"></div>
+                <!-- The target belongs WITH the three buttons it scopes. Admin
+                     only: a user can only ever command their own phones, so the
+                     control would be a lie for them. -->
+                <div class="cmd-group">
+                    <select class="filter-dropdown admin-only" id="commandTarget" title="Which phones the three buttons to the right act on">
+                        <option value="all">All users</option>
+                    </select>
+                    <button class="clear-log-btn" id="clearLogBtn" onclick="clearForwardLog()">📋 Clear Log</button>
+                    <button class="test-msg-btn" id="testMsgBtn" onclick="sendTestMessage()">📡 Test</button>
+                    <button class="test-msg-btn" id="fetchLatestBtn" onclick="fetchLatest()" title="Ask the device to forward its newest SMS — use when a code never arrived">📥 Get latest</button>
+                </div>
+                <button class="clear-all-btn danger" onclick="clearAllMessages()">🗑️ Clear All</button>
             </div>
-            <button class="clear-all-btn" onclick="clearAllMessages()">🗑️ Clear All</button>
-            <!-- Targeting. Admin only: a user can only ever command their own
-                 phones, so the control would be a lie for them. -->
-            <select class="filter-dropdown admin-only" id="commandTarget" title="Which phones the buttons below act on">
-                <option value="all">All users</option>
-            </select>
-            <button class="clear-log-btn" id="clearLogBtn" onclick="clearForwardLog()">📋 Clear Log</button>
-            <button class="test-msg-btn" id="testMsgBtn" onclick="sendTestMessage()">📡 Test</button>
-            <button class="test-msg-btn" id="fetchLatestBtn" onclick="fetchLatest()" title="Ask the device to forward its newest SMS — use when a code never arrived">📥 Get latest</button>
-            <button class="logout-btn" onclick="doLogout()">Logout</button>
         </div>
         <div class="grid-container">
             <div class="section">

@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.25.0
+ * server.js — GetOTP Render Server v4.26.2
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -334,8 +334,9 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         allowedHosts:     store.usersEnabled() ? store.users.getAllowedHosts() : [],
         // Which user owns this device, so the app can join that FCM topic and
         // admin targeting can reach some phones and not others.
-        userId:           (store.usersEnabled() && req.query.deviceId)
-                              ? (store.users.getDevice(req.query.deviceId) || {}).userId || ''
+        userId:           (store.usersEnabled() && req.query.deviceId
+                           && store.users.ownerOf(req.query.deviceId) !== store.users.ADMIN_ID)
+                              ? store.users.ownerOf(req.query.deviceId)
                               : ''
     });
 });
@@ -750,13 +751,17 @@ app.post('/api/register', requireApiKey, (req, res) => {
         // say so plainly rather than 404ing an app that will retry forever.
         return res.json({ success: true, usersEnabled: false });
     }
-    const { deviceId, model, name } = req.body || {};
-    const device = store.users.registerDevice(deviceId, { model, name });
+    const { deviceId, model, name, claimedUser } = req.body || {};
+    const device = store.users.registerDevice(deviceId, { model, name, claimedUser });
     res.json({
         success: true, usersEnabled: true,
         deviceId: device.id,
         assigned: !!device.userId,
-        userId:   device.userId || '',
+        // The EFFECTIVE owner after precedence, not the raw assignment — this
+        // is what the phone joins an FCM topic for.
+        userId:   store.users.ownerOf(device.id) === store.users.ADMIN_ID
+                      ? '' : store.users.ownerOf(device.id),
+        claimStatus: store.users.claimStatus(device.id),
         allowedHosts: store.users.getAllowedHosts()
     });
 });

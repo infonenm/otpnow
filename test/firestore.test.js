@@ -408,6 +408,64 @@ const mk = ${fakeDb.toString()};
         'the original text is kept — the explanation adds to it, never replaces it');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 13. A FAILED READ MUST NEVER BE MISTAKEN FOR AN EMPTY ONE.
+//
+// This destroyed real config in production. readConfig() returned null for both
+// "the document does not exist" and "the read failed", and the caller's answer
+// to "does not exist" is to MIGRATE — writing whatever it currently holds up to
+// Firestore. On a fresh container that is the env-default CATCH-ALL. So one slow
+// read on a cold start overwrote a saved filter set, silently and permanently,
+// because the good copy was the thing being replaced.
+//
+// Cold Render meeting cold Firestore is exactly when a read is most likely to be
+// slow, which is to say: the most likely moment is also the most damaging one.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    const stateFile = tmpState();
+    fs.writeFileSync(stateFile, JSON.stringify({
+        globalForwarding: true, autoDeleteMinutes: 30,
+        filters: [{ phoneNumber: 'DEFAULT', patterns: ['\\bis\\s+(\\d{4,8})\\b'] }]
+    }));
+
+    const out = run({ STATE_FILE: stateFile, OTP_PATTERNS: '(\\d{4,8})' }, PRELUDE + `
+        const db = mk({ readThrows: true });
+        firestore._setDbForTests(db);
+        const store = require(${JSON.stringify(path.join(LIB, "store.js"))});
+        store.loadDurableConfig();
+        setTimeout(() => {
+            console.log('WRITES=' + db.calls.set);
+            process.exit(0);
+        }, 400);
+    `);
+    assert.ok(/WRITES=0/.test(out.stdout),
+        'A FAILED READ MUST NOT TRIGGER A MIGRATION. Writing here overwrites the very '
+        + 'config we failed to read. Got: ' + out.stdout);
+    assert.ok(/NOT\s+migrating/i.test(out.stderr),
+        'and it must say so, because the alternative is silent data loss');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 14. Nor may a fresh container migrate its ENV DEFAULTS over a real config.
+//
+// Second guard, independent of the first. Even after a genuinely successful
+// "document not found", writing the catch-all up is not a migration — it is
+// publishing a value nobody chose. The first real save writes the real config.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    const out = run({ STATE_FILE: tmpState(), OTP_PATTERNS: '(\\d{4,8})' }, PRELUDE + `
+        const db = mk({ doc: null });            // read succeeds, document absent
+        firestore._setDbForTests(db);
+        const store = require(${JSON.stringify(path.join(LIB, "store.js"))});
+        store.loadDurableConfig();
+        setTimeout(() => { console.log('WRITES=' + db.calls.set); process.exit(0); }, 400);
+    `);
+    assert.ok(/WRITES=0/.test(out.stdout),
+        'a fresh container has nothing worth migrating — it must not publish the catch-all');
+    assert.ok(/nothing local worth migrating/i.test(out.stderr),
+        'and must say why it did nothing');
+}
+
 console.log('ok — Firestore is off the OTP path (0 calls), config loads and falls back, '
     + "migration runs once, and in server.js's own require order the cold-start "
     + 'window cannot extract a wrong code');

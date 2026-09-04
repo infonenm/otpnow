@@ -159,13 +159,28 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
         'TWO DEVICES WITH AN UNRESOLVED SIM MUST NOT SHARE A KEY. Sharing one is '
         + "how one person's SMS supersedes another's live OTP.");
 
+    // THE KEY MUST SURVIVE canonicalizePhone. It strips non-digits from the
+    // whole string, so a raw "Unknown-<hex>" key collapses into something that
+    // looks like a phone number 3.87% of the time — and "01488819719" is a
+    // valid BD mobile number, so it can COLLIDE with a real recipient. Exactly
+    // the bug the disambiguation exists to prevent. Found by a test that failed
+    // roughly one run in twenty-five.
+    const { canonicalizePhone } = require('../lib/phone');
+    for (const m of unknowns) {
+        assert.strictEqual(canonicalizePhone(m.recipient), m.recipient,
+            'an Unknown key must be canonicalize-stable, or the OTP becomes '
+            + 'unfetchable and the key can collide with a real number: ' + m.recipient);
+        assert.ok(!/\d/.test(m.recipient.slice('Unknown-'.length)),
+            'which is why the device id is encoded to letters only');
+    }
+
     const stillPending = unknowns.filter(m => m.status === 'pending');
     assert.strictEqual(stillPending.length, 2,
         'neither message may have superseded the other — they belong to different phones');
 
-    assert.strictEqual(store.getOtp('Unknown-' + devA), '111111',
+    assert.strictEqual(store.getOtp(store.unknownKey(devA)), '111111',
         "rahim's phone keeps its own code");
-    assert.strictEqual(store.getOtp('Unknown-' + devB), '222222',
+    assert.strictEqual(store.getOtp(store.unknownKey(devB)), '222222',
         "karim's phone keeps its own code");
 
     // ── Scoping is server-side ───────────────────────────────────────────────
@@ -216,7 +231,7 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
         sender: 'IVAC', recipient: '01722222222', message: 'Your OTP is 444444',
         arrivedAt: Date.now(), deviceId: devA } });
     assert.strictEqual(res.status, 200, "a deactivated user's phone keeps forwarding");
-    const filed = store.getSmsFor(users.ADMIN_ID).find(m => m.message.includes('444444'));
+    let filed = store.getSmsFor(users.ADMIN_ID).find(m => m.message.includes('444444'));
     assert.ok(filed, 'and the message is stored');
     assert.strictEqual(filed.userId, users.ADMIN_ID,
         'filed to admin, so nothing stops arriving while you sort out the phone');
@@ -274,9 +289,63 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
     res = await req('GET', '/api/users', { token: adminToken });
     assert.ok(!res.raw.includes('scrypt$'), 'a password hash must never leave the server');
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // THE OPTIONAL USERNAME CLAIM, AND WHO WINS
+    //
+    // Rules, in the owner's words: only the admin creates users; typing a name
+    // on a phone grants nothing; a blank or unknown name still forwards
+    // perfectly; and the dashboard assignment always wins.
+    // ─────────────────────────────────────────────────────────────────────────
+    await req('POST', '/api/users', { token: adminToken, body: { name: 'Sabbir' } });
+
+    // A phone claiming a real user is linked without any dashboard action.
+    let r = await req('POST', '/api/register', { apiKey: 'test-key',
+        body: { model: 'Vivo Y21', claimedUser: 'sabbir' } });
+    const devC = r.body.deviceId;
+    assert.strictEqual(r.body.claimStatus, 'claimed', 'a valid claim links the phone');
+    assert.strictEqual(r.body.userId, 'sabbir', 'and the effective owner is that user');
+
+    await req('POST', '/sms', { apiKey: 'test-key', body: {
+        sender: 'IVAC', recipient: '01788888888', message: 'Your OTP is 888888', deviceId: devC } });
+    filed = store.getSmsFor(users.ADMIN_ID).find(m => m.message.includes('888888'));
+    assert.strictEqual(filed.userId, 'sabbir', 'and its messages file to them');
+
+    // THE DASHBOARD WINS. An admin assignment outranks whatever was typed.
+    await req('POST', `/api/devices/${devC}/assign`, { token: adminToken, body: { userId: 'rahim' } });
+    r = await req('POST', '/api/register', { apiKey: 'test-key',
+        body: { deviceId: devC, claimedUser: 'sabbir' } });
+    assert.strictEqual(r.body.userId, 'rahim',
+        'THE DASHBOARD ASSIGNMENT WINS — a typed name can be mistyped or go stale, and '
+        + 'the dashboard is the only side fixable without touching the phone');
+    assert.strictEqual(r.body.claimStatus, 'overridden',
+        'and the phone is told so, rather than the field looking ignored');
+
+    // An unknown name is NOT an error — forwarding must never depend on a typo
+    // in an optional field.
+    r = await req('POST', '/api/register', { apiKey: 'test-key',
+        body: { model: 'Oppo A17', claimedUser: 'nosuchperson' } });
+    const devU = r.body.deviceId;
+    assert.strictEqual(r.body.claimStatus, 'unknown_user', 'the typo is reported');
+    assert.strictEqual(r.body.userId, '', 'and no owner is invented');
+
+    res = await req('POST', '/sms', { apiKey: 'test-key', body: {
+        sender: 'IVAC', recipient: '01799991111', message: 'Your OTP is 999111', deviceId: devU } });
+    assert.strictEqual(res.status, 200, 'A PHONE WITH A BAD USERNAME STILL FORWARDS');
+    assert.strictEqual(res.body.code, '999111', 'and extraction is entirely unaffected');
+    filed = store.getSmsFor(users.ADMIN_ID).find(m => m.message.includes('999111'));
+    assert.strictEqual(filed.userId, users.ADMIN_ID, 'its messages go to admin');
+
+    // A claim on a DEACTIVATED account also falls back to admin.
+    await req('POST', '/api/users/sabbir/active', { token: adminToken, body: { active: false } });
+    r = await req('POST', '/api/register', { apiKey: 'test-key',
+        body: { model: 'Realme C55', claimedUser: 'sabbir' } });
+    assert.strictEqual(r.body.claimStatus, 'inactive_user', 'a deactivated account is reported');
+    assert.strictEqual(r.body.userId, '', 'and does not become an owner');
+
     console.log('ok — identity: enrollment codes are one-time, scoping is server-side, '
         + 'deactivation takes every control mid-session, two unresolved SIMs no longer '
-        + 'collide, and an older app still works');
+        + 'collide, an unknown username still forwards, the dashboard always wins, '
+        + 'and an older app still works');
     process.exit(0);
 })().catch(e => {
     console.error(e);
