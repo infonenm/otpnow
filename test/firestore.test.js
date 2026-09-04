@@ -356,6 +356,30 @@ const mk = ${fakeDb.toString()};
         'a caller that never loads durable config must behave exactly as before');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. Saving must CLEAR the "running on env defaults" warning.
+//
+// configSource was written only at boot and by a Firestore load, so after a
+// successful save the dashboard still showed "running on env defaults — these
+// filters are the catch-all" in red. Alarming and wrong. The catch-all warning
+// is the one message that must never cry wolf, or it stops being read on the
+// day it is true.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    const out = run({ STATE_FILE: tmpState(), OTP_PATTERNS: '(\\d{4,8})' }, `
+        const store = require(${JSON.stringify(path.join(LIB, 'store.js'))});
+        console.log('BEFORE=' + store.configStatus().source);
+        store.setFilters([{ phoneNumber: 'DEFAULT', patterns: ['\\bis\\s+(\\d{4,8})\\b'] }]);
+        console.log('AFTER=' + store.configStatus().source);
+        process.exit(0);
+    `);
+    assert.ok(/BEFORE=env defaults/.test(out.stdout),
+        'a fresh container with no state file genuinely is on the catch-all');
+    assert.ok(/AFTER=dashboard/.test(out.stdout),
+        'after a save the config is the operator\'s, and the red warning must clear: '
+        + out.stdout);
+}
+
 console.log('ok — Firestore is off the OTP path (0 calls), config loads and falls back, '
     + "migration runs once, and in server.js's own require order the cold-start "
     + 'window cannot extract a wrong code');

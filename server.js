@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.24.0
+ * server.js — GetOTP Render Server v4.24.1
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
