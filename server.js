@@ -1,9 +1,11 @@
 /**
- * server.js — GetOTP Render Server v4.20.0
+ * server.js — GetOTP Render Server v4.24.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
- * no single "GetOTP system version" — the app is far ahead (4.16.x) because it
- * changes far more often. The one number that must agree is the one in
+ * no single "GetOTP system version" — the app is far ahead because it changes
+ * far more often. (This line named a specific app version and then went stale
+ * by nine releases, which is the exact failure it was warning about. It does not
+ * name one any more.) The one number that must agree is the one in
  * package.json, this header, and the startup log line below; they had drifted
  * to 4.5.0 / v4.5 / "v4.6" in three places, which made "which server is
  * actually deployed?" unanswerable from the logs.
@@ -37,9 +39,19 @@ const path    = require('path');
 const store   = require('./lib/store');
 const otp     = require('./lib/otp');
 const fcm     = require('./lib/fcm');
+const firestore = require('./lib/firestore');
 
 // Initialize FCM (silent no-op if FIREBASE_SERVICE_ACCOUNT not set)
 fcm.init();
+
+// Durable config storage. init() is a no-op unless FIRESTORE_ENABLED is on.
+// The LOAD below is deliberately not awaited: nothing may block the server
+// from listening, so forwarding and fetching work from the first millisecond.
+// See the deferred-extraction block in lib/store.js for the one window this
+// leaves open and how it is closed without blocking.
+firestore.init();
+store.loadDurableConfig();
+store.loadIdentity();
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -64,6 +76,16 @@ const asyncRoute = fn => (req, res, next) =>
 
 const DEFAULT_GATEWAYS = { bkash: [], rocket: [], dgepayebl: [] };
 
+/**
+ * Names a gateway alias may not take.
+ *
+ * Aliases are registered with app.get('/' + name) well ABOVE /health and the
+ * static handler, so GATEWAYS={"health":[]} would quietly replace the keepalive
+ * endpoint with an OTP fetcher — UptimeRobot would still get a 200 and you
+ * would never know the check had stopped checking anything.
+ */
+const RESERVED_GATEWAY_NAMES = new Set(['get', 'sms', 'health', 'api']);
+
 function parseGateways() {
     const raw = process.env.GATEWAYS;
     if (!raw) return DEFAULT_GATEWAYS;
@@ -73,6 +95,11 @@ function parseGateways() {
         for (const [name, tokens] of Object.entries(parsed)) {
             if (!/^[a-z0-9_-]{1,32}$/i.test(name)) {
                 console.warn(`[server] Ignoring invalid gateway name: ${name}`);
+                continue;
+            }
+            if (RESERVED_GATEWAY_NAMES.has(name.toLowerCase())) {
+                console.warn(`[server] Ignoring reserved gateway name "${name}" — `
+                    + `it would shadow the real /${name.toLowerCase()} endpoint`);
                 continue;
             }
             out[name] = Array.isArray(tokens) ? tokens.map(String) : [];
@@ -169,11 +196,32 @@ function requireGetKey(req, res, next) {
     next();
 }
 
+/**
+ * Any signed-in caller. The session is attached to the request so every route
+ * below can scope what it returns without re-deriving who is asking.
+ *
+ * getSession() re-checks that the account is still active on EVERY request, so
+ * deactivating someone takes their controls away mid-session rather than at
+ * token expiry. That check is a Map lookup — users are held in memory and
+ * Firestore is never consulted on a request path.
+ */
 function requireToken(req, res, next) {
     const auth  = req.headers.authorization || '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : (req.query.token || '');
-    if (!store.validateToken(token)) return res.status(401).json({ error: 'Unauthorized' });
+    const session = store.getSession(token);
+    if (!session) return res.status(401).json({ error: 'Unauthorized' });
+    req.session = session;
     next();
+}
+
+/** Admin only. User management, device assignment, and anything fleet-wide. */
+function requireAdmin(req, res, next) {
+    requireToken(req, res, () => {
+        if (req.session.role !== 'admin') {
+            return res.status(403).json({ error: 'Admin only' });
+        }
+        next();
+    });
 }
 
 
@@ -204,7 +252,7 @@ function requireToken(req, res, next) {
 // ON that way — a device that is off sends nothing — which is why the alarm
 // chain and the worker still exist.)
 app.post('/sms', requireApiKey, (req, res) => {
-    const { sender, recipient, message, arrivedAt } = req.body || {};
+    const { sender, recipient, message, arrivedAt, deviceId } = req.body || {};
     if (!sender || !message) {
         return res.status(400).json({ error: 'Missing sender or message' });
     }
@@ -215,7 +263,9 @@ app.post('/sms', requireApiKey, (req, res) => {
         return res.json({ success: true, ignored: true, globalForwarding: false });
     }
 
-    const result = store.addSms(sender, recipient || 'Unknown', message, arrivedAt || Date.now());
+    if (deviceId) store.users.touchDevice(deviceId);
+    const result = store.addSms(sender, recipient || 'Unknown', message,
+                                arrivedAt || Date.now(), deviceId);
     res.json({ success: true, id: result.id, code: result.code || null, globalForwarding: true });
 });
 
@@ -258,6 +308,9 @@ app.get('/get', requireGetKey, asyncRoute((req, res) => serveOtp(req, res, undef
 // the button you press precisely when FCM is the thing that is broken.
 app.get('/api/settings', requireApiKey, (req, res) => {
     const s = store.getSettings();
+    // Presence, from the poll the app already makes. No new mechanism, no new
+    // request — this is what answers "which phones are alive?" on the dashboard.
+    if (req.query.deviceId) store.users.touchDevice(req.query.deviceId);
     res.json({
         globalForwarding: s.globalForwarding,
         clearLogTs:       s.clearLogTs,
@@ -265,7 +318,10 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // Third one-shot. The poller is the carrier that survives a phone with
         // no Play Services, so a command that only rode FCM would silently not
         // work on exactly the devices most likely to have missed the SMS.
-        fetchLatestTs:    s.fetchLatestTs
+        fetchLatestTs:    s.fetchLatestTs,
+        // Dynamic allowlist. The app enforces it against this PLUS its own
+        // compiled-in host, which no remote list can remove.
+        allowedHosts:     store.usersEnabled() ? store.users.getAllowedHosts() : []
     });
 });
 
@@ -311,6 +367,18 @@ async function serveOtp(req, res, senderTokens) {
     const wait = Math.min(Math.max(parseInt(req.query.wait, 10) || 0, 0), MAX_WAIT_SECONDS);
     if (wait === 0) return res.json({ success: false, otp: '' });
 
+    // Every long-poll slot is taken. Say so instead of parking, because
+    // waitForOtp would refuse to park and resolve INSTANTLY — and the reply
+    // below would then claim `timedOut` after zero milliseconds, which a client
+    // reads as "I waited 25 s and nothing came" and answers by asking again
+    // immediately. That turns saturation into a tight loop against a server
+    // that is already saturated. `busy` is a different fact and deserves a
+    // different word: back off, do not treat it as "no OTP yet".
+    if (store.waitersFull()) {
+        console.warn('[server] Long-poll slots full — answering busy rather than parking');
+        return res.json({ success: false, otp: '', busy: true });
+    }
+
     let clientGone = false;
     res.on('close', () => { clientGone = true; });
 
@@ -339,9 +407,11 @@ for (const [name, tokens] of Object.entries(GATEWAYS)) {
 
 // Login — password from env var, returns session token
 //
-// BACK-OFF ON FAILURE. The dashboard token never expires and cannot be revoked
-// short of changing the password, so an unlimited-rate guessing endpoint in
-// front of it is the weak point. Each consecutive failure delays the NEXT
+// BACK-OFF ON FAILURE. (This comment used to justify itself with "the token
+// never expires and cannot be revoked" — true of the old derived token, false
+// since sessions became random and expiring. The back-off is still the right
+// control for a different reason: the password itself does not rotate, and this
+// endpoint is the only thing standing in front of it.) Each failure delays the NEXT
 // failed answer, doubling to a five-second ceiling, which turns a feasible
 // online brute force into an infeasible one.
 //
@@ -362,10 +432,11 @@ app.post('/api/logout', requireToken, (req, res) => {
 });
 
 app.post('/api/login', asyncRoute(async (req, res) => {
-    const { password } = req.body || {};
+    const { password, username } = req.body || {};
     if (!password) return res.status(400).json({ error: 'Missing password' });
 
-    const token = store.login(password);
+    // username absent = admin, which is exactly today's behaviour.
+    const token = store.login(password, username);
     if (!token) {
         const delay = Math.min(100 * Math.pow(2, loginFailures), LOGIN_MAX_DELAY_MS);
         loginFailures++;
@@ -378,12 +449,29 @@ app.post('/api/login', asyncRoute(async (req, res) => {
         console.log(`[server] Dashboard login OK after ${loginFailures} failed attempt(s)`);
         loginFailures = 0;
     }
-    res.json({ token });
+    const session = store.getSession(token);
+    res.json({ token, role: session.role, userId: session.userId });
 }));
+
+// First login: set a password with the one-time enrollment code.
+//
+// Without a code an account that has no password yet belongs to whoever reaches
+// it first — a username is not a secret. Deliberately unauthenticated, because
+// the code IS the authentication, and deliberately not saying whether the user
+// exists, so it cannot be used to enumerate accounts.
+app.post('/api/set-password', (req, res) => {
+    if (!store.usersEnabled()) return res.status(404).json({ error: 'Users are not enabled' });
+    const { username, code, password } = req.body || {};
+    const r = store.users.setPassword(username, code, password);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json({ success: true });
+});
 
 // All current messages
 app.get('/api/messages', requireToken, (req, res) => {
-    res.json({ messages: store.getAllSms() });
+    // Scoped SERVER-SIDE. A user must not receive another user's messages and
+    // have the browser hide them.
+    res.json({ messages: store.getSmsFor(req.session.userId) });
 });
 
 // SSE real-time stream
@@ -473,13 +561,144 @@ app.post('/api/auto-delete', requireToken, (req, res) => {
     res.json({ success: true });
 });
 
+// ═════════════════════════════════════════════════════════════════
+// IDENTITY — users, devices, allowed hosts (admin only)
+// ═════════════════════════════════════════════════════════════════
+//
+// Every route here is behind USERS_ENABLED and requireAdmin. With the flag off
+// they answer 404, so the surface does not exist until you turn it on.
+
+function usersGate(req, res, next) {
+    if (!store.usersEnabled()) return res.status(404).json({ error: 'Users are not enabled' });
+    next();
+}
+
+app.get('/api/users', usersGate, requireAdmin, (req, res) => {
+    res.json({ users: store.users.listUsers(), stats: store.users.stats() });
+});
+
+// Create a user. The enrollment code is returned ONCE, here. Hand it over out
+// of band; it is what stops a passwordless account being claimed by whoever
+// learns the username.
+app.post('/api/users', usersGate, requireAdmin, (req, res) => {
+    const { name } = req.body || {};
+    const r = store.users.createUser(name);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json({ success: true, user: r.user, enrollCode: r.enrollCode });
+});
+
+// Reissue a code. The existing password stops working immediately — this is
+// both the reset path and the "they forgot it" path.
+app.post('/api/users/:id/reissue', usersGate, requireAdmin, (req, res) => {
+    const r = store.users.reissueCode(req.params.id);
+    if (!r.ok) return res.status(404).json({ error: r.error });
+    store.revokeSessionsFor(store.users.slug(req.params.id));
+    res.json({ success: true, enrollCode: r.enrollCode });
+});
+
+// Deactivate / reactivate.
+//
+// Deactivating revokes every live session on the spot, so their controls stop
+// responding mid-click rather than at token expiry. Their DEVICES keep
+// forwarding and their messages file to admin — nothing stops arriving while
+// you work out who should own that phone.
+app.post('/api/users/:id/active', usersGate, requireAdmin, (req, res) => {
+    const { active } = req.body || {};
+    if (typeof active !== 'boolean') return res.status(400).json({ error: 'active must be boolean' });
+    const r = store.users.setActive(req.params.id, active);
+    if (!r.ok) return res.status(404).json({ error: r.error });
+    const killed = active ? 0 : store.revokeSessionsFor(store.users.slug(req.params.id));
+    res.json({ success: true, user: r.user, sessionsRevoked: killed });
+});
+
+// Purge. Deliberately separate from deactivate and deliberately second: a hard
+// delete on a live system takes phones off their owner instantly and has no
+// undo. History is NOT rewritten — a message records what happened when it
+// happened, and keeps the userId it was stamped with.
+app.post('/api/users/:id/purge', usersGate, requireAdmin, (req, res) => {
+    const id = store.users.slug(req.params.id);
+    const r = store.users.purgeUser(id);
+    if (!r.ok) return res.status(404).json({ error: r.error });
+    store.revokeSessionsFor(id);
+    res.json({ success: true, unassignedDevices: r.unassignedDevices });
+});
+
+// ─── Devices ────────────────────────────────────────────────────
+
+app.get('/api/devices', usersGate, requireAdmin, (req, res) => {
+    res.json({ devices: store.users.listDevices() });
+});
+
+app.post('/api/devices/:id/assign', usersGate, requireAdmin, (req, res) => {
+    const { userId } = req.body || {};
+    const r = store.users.assignDevice(req.params.id, userId === null ? null : userId);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json({ success: true, device: r.device });
+});
+
+app.post('/api/devices/:id/rename', usersGate, requireAdmin, (req, res) => {
+    const r = store.users.renameDevice(req.params.id, (req.body || {}).name);
+    if (!r.ok) return res.status(404).json({ error: r.error });
+    res.json({ success: true, device: r.device });
+});
+
+app.post('/api/devices/:id/remove', usersGate, requireAdmin, (req, res) => {
+    const r = store.users.removeDevice(req.params.id);
+    if (!r.ok) return res.status(404).json({ error: 'No such device' });
+    res.json({ success: true });
+});
+
+// ─── Allowed hosts ──────────────────────────────────────────────
+//
+// Served to the app on /api/settings so moving to a new server is a dashboard
+// edit rather than a reinstall. The app keeps its COMPILED-IN host as a
+// permanent anchor that no remote list can remove, so a bad list here can never
+// strand a phone.
+app.get('/api/allowed-hosts', usersGate, requireAdmin, (req, res) => {
+    res.json({ hosts: store.users.getAllowedHosts() });
+});
+
+app.post('/api/allowed-hosts', usersGate, requireAdmin, (req, res) => {
+    const r = store.users.setAllowedHosts((req.body || {}).hosts);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json({ success: true, hosts: r.hosts });
+});
+
+// ─── Device registration (from the app, API key auth) ───────────
+//
+// A phone announcing itself. It is NOT rejected for having no owner: its
+// messages file to admin and it appears on the dashboard as unassigned, waiting
+// for a click. Rejecting it would mean a new phone silently forwards nothing,
+// which is the worst possible failure for a system whose job is not to lose
+// messages.
+app.post('/api/register', requireApiKey, (req, res) => {
+    if (!store.usersEnabled()) {
+        // Older-app compatibility runs the other way too: with the flag off,
+        // say so plainly rather than 404ing an app that will retry forever.
+        return res.json({ success: true, usersEnabled: false });
+    }
+    const { deviceId, model, name } = req.body || {};
+    const device = store.users.registerDevice(deviceId, { model, name });
+    res.json({
+        success: true, usersEnabled: true,
+        deviceId: device.id,
+        assigned: !!device.userId,
+        allowedHosts: store.users.getAllowedHosts()
+    });
+});
+
 // Full settings (for dashboard settings panel)
 app.get('/api/full-settings', requireToken, (req, res) => {
     // fcm included so "is push actually reaching my phones?" is answerable.
     // send() is fire-and-forget by design, so without this a broken service
     // account is completely silent — the dashboard toggle still returns 200 and
     // the device just never hears about it.
-    res.json(Object.assign(store.getSettings(), { fcm: fcm.getStatus() }));
+    // config included so "which source are these filters from, and did my last
+    // save actually reach the cloud?" is answerable without reading the logs.
+    res.json(Object.assign(store.getSettings(), {
+        fcm:    fcm.getStatus(),
+        config: store.configStatus()
+    }));
 });
 
 

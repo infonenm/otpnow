@@ -56,5 +56,30 @@ assert.deepStrictEqual(store.mergeFilterRules(merged), merged,
 // A genuinely different sender is never absorbed.
 assert.ok(find('IVAC FEES'), 'IVAC FEES normalises to IVACFEES and stays separate');
 
-console.log('ok — same-sender rules merge, fallbacks run, order preserved');
+// ── The dashboard must SHOW a rejection ──────────────────────────────────────
+//
+// POST /api/filters refuses a pattern that can never match (double-escaped, or
+// with no capture group) precisely so the mistake surfaces when you save it
+// rather than the next time you need an OTP. saveConfig() awaited both fetches
+// and read neither result, so it reported "Settings saved" and closed the modal
+// on a 400 — the guard fired correctly and was invisible at the only place
+// anyone uses it. These are static checks on the one file that renders it.
+const fs = require('fs');
+const html = fs.readFileSync(__dirname + '/../public/index.html', 'utf8');
+const saveConfig = html.slice(html.indexOf('async function saveConfig()'));
+const body = saveConfig.slice(0, saveConfig.indexOf('\n    }') + 6);
+
+assert.ok(/if\s*\(!fRes\.ok\)/.test(body),
+    'saveConfig must check the /api/filters response before claiming success');
+assert.ok(body.indexOf('showConfigError') < body.indexOf("notify('💾 Settings saved')"),
+    'a rejection must be surfaced, and before any success message');
+assert.ok(/problems/.test(html),
+    "the server's per-pattern 'problems' list must be rendered, not just the status code");
+assert.ok(/id="configError"/.test(html),
+    'the modal needs somewhere to put the reason');
+assert.ok(body.indexOf('return;') < body.indexOf("closeConfig()"),
+    'a failed save must not close the modal — the rejected patterns stay on screen');
+
+console.log('ok — same-sender rules merge, fallbacks run, order preserved, '
+    + 'and a refused pattern is shown');
 process.exit(0);

