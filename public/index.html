@@ -108,11 +108,20 @@
 
     .logo{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800;letter-spacing:-0.02em}
     .logo-icon{font-size:17px}
+    /* Who you are signed in as. On a multi-user dashboard this is the single
+       most important thing to be sure of before you press anything — an admin
+       action taken while you thought you were a user, or the reverse, is a
+       confusing five minutes. So it is tinted rather than grey. */
     .whoami{
-        font-family:var(--mono);font-size:11px;color:var(--text-2);
-        background:var(--bg-card);border:1px solid var(--border);
-        padding:4px 9px;border-radius:20px;
+        display:inline-flex;align-items:center;gap:5px;
+        font-family:var(--mono);font-size:11.5px;font-weight:600;
+        color:var(--teal);background:var(--teal-dim);
+        border:1px solid var(--teal-line);
+        padding:5px 11px;border-radius:20px;white-space:nowrap;
     }
+    .whoami::before{content:'👤';font-size:11px}
+    /* An admin is the account that can change things for everyone. */
+    .whoami.is-admin{color:var(--amber);background:var(--amber-dim);border-color:rgba(245,181,68,0.32)}
 
     /* ONE pill, not a dot plus a word plus a second word. The dot is a
        pseudo-element so setConnectionStatus() can keep setting textContent
@@ -155,6 +164,16 @@
     .forward-toggle-btn:disabled{opacity:.55;cursor:default}
 
     .search-bar{display:flex;gap:8px;flex:0 1 380px;min-width:180px}
+    .search-wrap{position:relative;flex:1;min-width:0;display:flex}
+    .search-wrap input{width:100%;padding-right:32px}
+    .search-clear{
+        display:none;position:absolute;right:5px;top:50%;transform:translateY(-50%);
+        width:22px;height:22px;align-items:center;justify-content:center;
+        background:none;border:none;border-radius:50%;color:var(--text-3);
+        font-size:13px;line-height:1;cursor:pointer;transition:all .12s;
+    }
+    .search-clear:hover{color:var(--text-1);background:var(--bg-hover)}
+    .search-clear.show{display:flex}
     .search-bar input,.filter-dropdown{
         padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);
         border-radius:var(--radius-sm);color:var(--text-1);font-size:12.5px;
@@ -169,7 +188,17 @@
        are scoped to attached rather than floating beside unrelated things. */
     #commandTarget{max-width:130px}
     .menu-wrap{position:relative}
-    .menu-btn{font-size:15px;line-height:1;padding:7px 11px;letter-spacing:1px}
+    /* Square, and sized by its hit area rather than by the glyph. "⋯" is a
+       text character, so a button padded for words ends up far smaller than it
+       looks — and on a control that opens everything else, that is the one to
+       get wrong last. */
+    .menu-btn{
+        display:inline-flex;align-items:center;justify-content:center;
+        width:38px;height:36px;padding:0;font-size:20px;line-height:1;
+        letter-spacing:0;font-weight:700;color:var(--text-2);
+    }
+    .menu-btn:hover{color:var(--text-1)}
+    .menu-wrap .menu.open + .menu-btn,.menu-btn:focus-visible{outline:none}
     .menu{
         display:none;position:absolute;right:0;top:calc(100% + 8px);min-width:210px;
         background:var(--bg-panel);border:1px solid var(--border-h);
@@ -177,7 +206,8 @@
     }
     .menu.open{display:block}
     .menu-item{
-        display:block;width:100%;text-align:left;padding:9px 11px;background:none;border:none;
+        display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+        padding:9px 11px;background:none;border:none;
         color:var(--text-1);font-size:12.5px;font-weight:500;font-family:var(--sans);
         border-radius:var(--radius-sm);cursor:pointer;transition:background .12s;white-space:nowrap;
     }
@@ -462,7 +492,14 @@
             <span id="whoami" class="whoami"></span>
 
             <div class="search-bar">
-                <input type="text" id="searchInput" placeholder="🔍 Filter by number…" oninput="filterMessages()">
+                <!-- The ✕ lives IN the box and only exists while there is
+                     something to clear. A separate Clear button was a permanent
+                     control for an occasional action, and it duplicated the
+                     dropdown's own "All Numbers" option. -->
+                <div class="search-wrap">
+                    <input type="text" id="searchInput" placeholder="🔍 Filter by number…" oninput="filterMessages()">
+                    <button id="searchClear" class="search-clear" onclick="clearSearch()" title="Clear" aria-label="Clear search">✕</button>
+                </div>
                 <select class="filter-dropdown" id="numberFilter" onchange="filterMessages()">
                     <option value="">All Numbers</option>
                 </select>
@@ -473,24 +510,26 @@
             <select class="filter-dropdown admin-only" id="commandTarget" title="Which phones Test and Get latest act on">
                 <option value="all">All users</option>
             </select>
-            <button class="tb-btn" id="testMsgBtn" onclick="sendTestMessage()" title="Ask the device to send a test message">📡 Test</button>
-            <button class="tb-btn" id="fetchLatestBtn" onclick="fetchLatest()" title="Ask the device to forward its newest SMS — use when a code never arrived">📥 Get latest</button>
+            <button class="tb-btn" id="testMsgBtn" onclick="sendTestMessage()" title="Send a test message to the selected phones">📡 Test</button>
+            <button class="tb-btn" id="fetchLatestBtn" onclick="fetchLatest()" title="Ask the phone to forward its newest SMS — use when a code never arrived">📥 Latest</button>
 
+            <!-- A user sees forwarding state and their own override; the GLOBAL
+                 switch is admin-only, and /api/toggle enforces that. Showing it
+                 to a user was offering a button that could only ever 403. -->
             <button id="overrideBtn" class="tb-btn user-only" onclick="startOverride()" style="display:none"></button>
-            <button id="forwardToggleBtn" class="forward-toggle-btn disabled" onclick="toggleForwarding()" disabled>⏳ Loading…</button>
+            <button id="forwardToggleBtn" class="forward-toggle-btn disabled admin-only" onclick="toggleForwarding()" disabled>⏳ …</button>
 
             <div class="menu-wrap">
                 <button class="tb-btn menu-btn" onclick="toggleMenu(event)" title="More">⋯</button>
                 <div id="barMenu" class="menu">
-                    <button class="menu-item admin-only" onclick="closeMenu();openConfig()">⚙️ Filters &amp; Settings</button>
-                    <button class="menu-item admin-only" onclick="closeMenu();openAdmin()">👥 Users &amp; Devices</button>
+                    <button class="menu-item admin-only" onclick="closeMenu();openConfig()">⚙️ Filters</button>
+                    <button class="menu-item admin-only" onclick="closeMenu();openAdmin()">👥 Users</button>
                     <button class="menu-item admin-only" onclick="closeMenu();openHistory()">🕘 History</button>
                     <div class="menu-sep"></div>
-                    <button class="menu-item" onclick="closeMenu();clearFilters()">✖️ Clear filters</button>
-                    <button class="menu-item" id="clearLogBtn" onclick="closeMenu();clearForwardLog()">📋 Clear forward log</button>
+                    <button class="menu-item" id="clearLogBtn" onclick="closeMenu();clearForwardLog()">📋 Clear log</button>
                     <div class="menu-sep"></div>
                     <!-- Destructive, and last, and the only red thing in here. -->
-                    <button class="menu-item menu-danger" onclick="closeMenu();clearAllMessages()">🗑️ Clear all messages</button>
+                    <button class="menu-item menu-danger" onclick="closeMenu();clearAllMessages()">🗑️ Clear messages</button>
                     <button class="menu-item" onclick="closeMenu();doLogout()">↩︎ Logout</button>
                 </div>
             </div>
@@ -838,8 +877,12 @@
         const isAdmin = me.role === 'admin';
         document.querySelectorAll('.admin-only')
             .forEach(el => el.style.display = isAdmin ? '' : 'none');
-        document.getElementById('whoami').textContent =
-            isAdmin ? 'admin' : me.userId;
+        const who = document.getElementById('whoami');
+        who.textContent = isAdmin ? 'admin' : me.userId;
+        who.className = 'whoami' + (isAdmin ? ' is-admin' : '');
+        who.title = isAdmin
+            ? 'Signed in as admin — your actions affect every user'
+            : 'Signed in as ' + me.userId + ' — you see and control only your own phones';
         if (isAdmin) fillTargetDropdown();
         renderOverrideButton();
     }
@@ -853,15 +896,32 @@
      */
     function fillTargetDropdown() {
         const sel = document.getElementById('commandTarget');
-        if (!sel || !identity) return;
+        if (!sel) return;
+        if (!identity) {
+            // USERS_ENABLED is off server-side. Say so; an empty dropdown with
+            // no explanation is the thing that wasted your time.
+            sel.innerHTML = '<option value="all">All users</option>'
+                + '<option disabled>Set USERS_ENABLED=true to aim at one user</option>';
+            return;
+        }
         const current = sel.value;
         const list = identity.userList || [];
         sel.innerHTML = '<option value="all">All users</option>'
             + list.map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('');
         sel.value = list.some(u => u.id === current) ? current : 'all';
-        // With no users there is nothing to aim at, and an "All users" dropdown
-        // offering only "All users" is clutter.
-        sel.style.display = list.length ? '' : 'none';
+
+        // NEVER HIDE IT. The first version hid the dropdown when the list was
+        // empty, which made "why can I not aim at a user?" unanswerable — it
+        // looks identical whether users are switched off, no user exists yet, or
+        // the control is simply missing. A disabled option that says which costs
+        // one line and answers the question on the spot.
+        if (!list.length) {
+            const why = (identity && identity.users === 0)
+                ? 'No users yet — create one in Users & Devices'
+                : 'Users are not enabled on the server';
+            sel.innerHTML = '<option value="all">All users</option>'
+                + `<option disabled>${esc(why)}</option>`;
+        }
     }
 
     /**
@@ -869,16 +929,36 @@
      * The server clamps the length and is the authority on when it ends — this
      * button only asks.
      */
+    /**
+     * The user's forwarding control.
+     *
+     * A user has no global switch, so this is the only place they can see
+     * whether their phones are forwarding at all. It therefore has to show the
+     * ON state too, not only offer the override — otherwise a user whose phones
+     * are working sees nothing about forwarding anywhere on the page.
+     */
     function renderOverrideButton() {
         const btn = document.getElementById('overrideBtn');
         if (!btn) return;
-        if (me.role === 'admin' || globalForwarding) { btn.style.display = 'none'; return; }
+        if (me.role === 'admin') { btn.style.display = 'none'; return; }
         btn.style.display = '';
+
         const left = (identity && identity.overrides && identity.overrides[me.userId])
             ? identity.overrides[me.userId].remainingMs : 0;
-        btn.textContent = left > 0
-            ? '🟢 My phones on — ' + Math.ceil(left / 60000) + ' min left'
-            : '▶️ Turn my phones on';
+
+        if (globalForwarding) {
+            btn.textContent = '🟢 Forwarding ON';
+            btn.title = 'Forwarding is on for everyone. Only an admin can change this.';
+            btn.disabled = true;
+        } else if (left > 0) {
+            btn.textContent = '🟢 My phones on — ' + Math.ceil(left / 60000) + ' min left';
+            btn.title = 'Your override is running. It ends on its own.';
+            btn.disabled = true;
+        } else {
+            btn.textContent = '▶️ Turn my phones on';
+            btn.title = 'Forwarding is off globally. Switch your own phones on for a while.';
+            btn.disabled = false;
+        }
     }
 
     async function startOverride() {
@@ -1076,8 +1156,14 @@
     function updateToggleBtn() {
         const btn = document.getElementById('forwardToggleBtn');
         btn.disabled = false;
-        if (globalForwarding) { btn.textContent = '🟢 Forwarding ON'; btn.className = 'forward-toggle-btn enabled'; }
-        else { btn.textContent = '🔴 Forwarding OFF'; btn.className = 'forward-toggle-btn disabled'; }
+        // Short label, unmistakable state: the fill colour already says which,
+        // so the word "Forwarding" was carrying no information the button did
+        // not already have. The tooltip keeps the full meaning for anyone new.
+        btn.title = globalForwarding
+            ? 'Forwarding is ON for every device. Click to turn it off.'
+            : 'Forwarding is OFF. Click to turn it on.';
+        btn.textContent = globalForwarding ? '🟢 ON' : '🔴 OFF';
+        btn.className = 'forward-toggle-btn ' + (globalForwarding ? 'enabled' : 'disabled');
     }
 
     async function clearAllMessages() {
@@ -1123,8 +1209,20 @@
         return sel ? sel.value : 'all';
     }
 
-    function filterMessages() { renderAll(); }
-    function clearFilters() { document.getElementById('searchInput').value = ''; document.getElementById('numberFilter').value = ''; renderAll(); }
+    function filterMessages() {
+        // The ✕ only exists while there is something to clear.
+        const input = document.getElementById('searchInput');
+        document.getElementById('searchClear').classList.toggle('show', !!input.value);
+        renderAll();
+    }
+
+    function clearSearch() {
+        const input = document.getElementById('searchInput');
+        input.value = '';
+        input.focus();          // you almost always want to type something else
+        filterMessages();
+    }
+
 
     function copyCode(code) {
         navigator.clipboard.writeText(code).then(() => notify('📋 Copied: ' + code)).catch(() => {});
