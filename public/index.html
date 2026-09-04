@@ -99,14 +99,12 @@
        switch and the connection light must never scroll away. */
     .top-bar{
         position:sticky;top:0;z-index:50;
-        background:rgba(17,23,38,0.86);backdrop-filter:blur(14px);
+        background:rgba(17,23,38,0.88);backdrop-filter:blur(14px);
         border:1px solid var(--border);border-radius:var(--radius-lg);
-        padding:14px 18px;margin-bottom:20px;
-        display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow);
+        padding:10px 14px;margin-bottom:20px;
+        display:flex;align-items:center;gap:8px;box-shadow:var(--shadow);
     }
-    .bar-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
     .bar-spacer{flex:1 1 auto;min-width:0}
-    .bar-row + .bar-row{padding-top:12px;border-top:1px solid var(--border)}
 
     .logo{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800;letter-spacing:-0.02em}
     .logo-icon{font-size:17px}
@@ -116,30 +114,35 @@
         padding:4px 9px;border-radius:20px;
     }
 
-    .live-indicator{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-2)}
-    .live-dot{width:7px;height:7px;border-radius:50%;background:var(--teal);animation:pulse 2s infinite}
-    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
-    .connection-status{font-size:11.5px;padding:4px 10px;border-radius:20px;font-weight:600}
+    /* ONE pill, not a dot plus a word plus a second word. The dot is a
+       pseudo-element so setConnectionStatus() can keep setting textContent
+       without wiping it. */
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    .connection-status{
+        display:inline-flex;align-items:center;gap:6px;
+        font-size:11.5px;padding:5px 11px;border-radius:20px;font-weight:600;
+        background:rgba(255,255,255,0.05);color:var(--text-2);white-space:nowrap;
+    }
+    .connection-status::before{
+        content:'';width:6px;height:6px;border-radius:50%;background:currentColor;flex:0 0 auto;
+    }
     .connection-status.connected{background:var(--teal-dim);color:var(--teal)}
+    .connection-status.connected::before{animation:pulse 2s infinite}
     .connection-status.disconnected{background:var(--red-dim);color:var(--red)}
 
     /* ── Buttons ────────────────────────────────────────────────
        One shared shape. Quiet by default; the accent is reserved for the
        forwarding switch so exactly one control asks for attention. */
-    .config-btn,.clear-btn,.clear-log-btn,.test-msg-btn,.logout-btn,.clear-all-btn,.tb-btn{
+    /* ONE button shape for the whole bar. Six separate classes used to say the
+       same thing with slightly different numbers, which is a large part of why
+       the header never looked deliberate however the elements were arranged. */
+    .tb-btn{
         padding:8px 13px;background:var(--bg-card);border:1px solid var(--border);
         border-radius:var(--radius-sm);color:var(--text-1);font-size:12.5px;font-weight:600;
         cursor:pointer;transition:background .15s,border-color .15s,color .15s;
         font-family:var(--sans);white-space:nowrap;
     }
-    .config-btn:hover,.clear-btn:hover,.clear-log-btn:hover,
-    .test-msg-btn:hover,.logout-btn:hover,.tb-btn:hover{
-        background:var(--bg-hover);border-color:var(--border-h);
-    }
-    .clear-all-btn{color:var(--red);border-color:var(--red-line);background:var(--red-dim)}
-    .clear-all-btn:hover{background:rgba(248,113,113,0.18)}
-    .clear-all-btn.danger{margin-left:4px}
-    .logout-btn{color:var(--text-2)}
+    .tb-btn:hover{background:var(--bg-hover);border-color:var(--border-h)}
 
     /* The only filled control on the page. */
     .forward-toggle-btn{
@@ -151,7 +154,7 @@
     .forward-toggle-btn.disabled{background:var(--red-dim);color:var(--red);border-color:var(--red-line)}
     .forward-toggle-btn:disabled{opacity:.55;cursor:default}
 
-    .search-bar{display:flex;gap:8px;flex:1 1 300px;min-width:220px;max-width:520px}
+    .search-bar{display:flex;gap:8px;flex:0 1 380px;min-width:180px}
     .search-bar input,.filter-dropdown{
         padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);
         border-radius:var(--radius-sm);color:var(--text-1);font-size:12.5px;
@@ -164,12 +167,24 @@
 
     /* The three one-shot commands read as one unit, with the target they
        are scoped to attached rather than floating beside unrelated things. */
-    .cmd-group{
-        display:flex;align-items:center;gap:6px;padding:4px 6px;
-        background:rgba(255,255,255,0.02);border:1px solid var(--border);
-        border-radius:var(--radius);
+    #commandTarget{max-width:130px}
+    .menu-wrap{position:relative}
+    .menu-btn{font-size:15px;line-height:1;padding:7px 11px;letter-spacing:1px}
+    .menu{
+        display:none;position:absolute;right:0;top:calc(100% + 8px);min-width:210px;
+        background:var(--bg-panel);border:1px solid var(--border-h);
+        border-radius:var(--radius);box-shadow:var(--shadow);padding:6px;z-index:100;
     }
-    #commandTarget{max-width:150px}
+    .menu.open{display:block}
+    .menu-item{
+        display:block;width:100%;text-align:left;padding:9px 11px;background:none;border:none;
+        color:var(--text-1);font-size:12.5px;font-weight:500;font-family:var(--sans);
+        border-radius:var(--radius-sm);cursor:pointer;transition:background .12s;white-space:nowrap;
+    }
+    .menu-item:hover{background:var(--bg-hover)}
+    .menu-danger{color:var(--red)}
+    .menu-danger:hover{background:var(--red-dim)}
+    .menu-sep{height:1px;background:var(--border);margin:5px 4px}
 
     /* ── Message columns ────────────────────────────────────── */
     .grid-container{display:grid;grid-template-columns:1fr 1fr;gap:20px}
@@ -331,12 +346,25 @@
         border-radius:3px 3px 0 0;cursor:pointer;transition:opacity .12s;
     }
     .strip div:hover{opacity:1}
+    /* Empty state: not a bar, and not shaped like one. */
+    .strip.strip-empty{
+        align-items:center;justify-content:center;color:var(--text-3);
+        font-family:var(--mono);font-size:11.5px;
+        border:1px dashed var(--border);border-radius:var(--radius-sm);
+    }
     .hist-row{
         display:flex;gap:10px;align-items:baseline;padding:10px 11px;margin-bottom:5px;
         background:var(--bg-card);border:1px solid var(--border);
         border-radius:var(--radius-sm);font-size:12.5px;
     }
     .hist-row .mono{font-family:var(--mono);font-size:11px;color:var(--text-3)}
+    .hist-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+    .hist-check{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);cursor:pointer;user-select:none}
+    .hist-check input{width:14px;height:14px;accent-color:var(--teal);cursor:pointer}
+    .hist-danger{color:var(--red);border-color:var(--red-line);background:var(--red-dim)}
+    .hist-danger:hover:not(:disabled){background:rgba(248,113,113,0.18)}
+    .hist-danger:disabled{opacity:.4;cursor:default;color:var(--text-3);border-color:var(--border);background:var(--bg-card)}
+    .hist-row.sel{border-color:var(--teal-line);background:rgba(0,212,170,0.05)}
     .hist-row .msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
 
     /* ── Toast ──────────────────────────────────────────────── */
@@ -355,12 +383,16 @@
         .grid-container{grid-template-columns:1fr}
         .sms-list{max-height:none}
     }
+    @media (max-width:1200px){
+        .top-bar{flex-wrap:wrap}
+        .search-bar{flex:1 1 240px}
+        .bar-spacer{display:none}
+    }
     @media (max-width:820px){
         .dashboard{padding:12px}
-        .bar-spacer{display:none}
-        .search-bar{max-width:none;flex-basis:100%}
-        .cmd-group{flex-wrap:wrap}
         .top-bar{position:static}
+        .search-bar{flex-basis:100%}
+        .whoami{display:none}
     }
 </style>
 </head>
@@ -406,42 +438,61 @@
              rest, because they sat next to Clear Log and the two are one
              mis-click apart with very different consequences.
              ═══════════════════════════════════════════════════════ -->
+        <!-- ═══════════════════════════════════════════════════════
+             ONE LINE.
+
+             Two rows was the wrong answer to "too many controls" — the right
+             answer is fewer controls in front of you. So this is ranked by how
+             often a thing is actually touched:
+
+               ALWAYS VISIBLE  the forwarding switch (the one thing you look at
+                               first), search, and the two diagnostics you reach
+                               for when something is wrong — Test and Get latest.
+               IN THE MENU     Settings, Users, History, Clear Log, Clear All,
+                               Logout. Occasional, or destructive, or both.
+
+             Live + Connected were saying the same thing twice: a pulsing dot and
+             the word "Live" next to a status that already reads "Connected".
+             Now one pill, dot included, which is also the only place on this bar
+             that turns red.
+             ═══════════════════════════════════════════════════════ -->
         <div class="top-bar">
-            <div class="bar-row">
-                <div class="logo"><span class="logo-icon">📱</span> GetOTP</div>
-                <div class="live-indicator"><div class="live-dot"></div> Live</div>
-                <div id="connectionStatus" class="connection-status">Connecting...</div>
-                <span id="whoami" class="whoami"></span>
-                <div class="bar-spacer"></div>
-                <button id="overrideBtn" class="config-btn user-only" onclick="startOverride()" style="display:none"></button>
-                <button id="forwardToggleBtn" class="forward-toggle-btn disabled" onclick="toggleForwarding()" disabled>⏳ Loading...</button>
-                <button class="config-btn admin-only" onclick="openConfig()">⚙️ Settings</button>
-                <button class="config-btn admin-only" id="adminBtn" onclick="openAdmin()">👥 Users</button>
-                <button class="config-btn admin-only" id="historyBtn" onclick="openHistory()">🕘 History</button>
-                <button class="logout-btn" onclick="doLogout()">Logout</button>
+            <div class="logo"><span class="logo-icon">📱</span> GetOTP</div>
+            <div id="connectionStatus" class="connection-status">Connecting…</div>
+            <span id="whoami" class="whoami"></span>
+
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="🔍 Filter by number…" oninput="filterMessages()">
+                <select class="filter-dropdown" id="numberFilter" onchange="filterMessages()">
+                    <option value="">All Numbers</option>
+                </select>
             </div>
 
-            <div class="bar-row">
-                <div class="search-bar">
-                    <input type="text" id="searchInput" placeholder="🔍 Filter by number..." oninput="filterMessages()">
-                    <select class="filter-dropdown" id="numberFilter" onchange="filterMessages()">
-                        <option value="">All Numbers</option>
-                    </select>
-                    <button class="clear-btn" onclick="clearFilters()">Clear</button>
+            <div class="bar-spacer"></div>
+
+            <select class="filter-dropdown admin-only" id="commandTarget" title="Which phones Test and Get latest act on">
+                <option value="all">All users</option>
+            </select>
+            <button class="tb-btn" id="testMsgBtn" onclick="sendTestMessage()" title="Ask the device to send a test message">📡 Test</button>
+            <button class="tb-btn" id="fetchLatestBtn" onclick="fetchLatest()" title="Ask the device to forward its newest SMS — use when a code never arrived">📥 Get latest</button>
+
+            <button id="overrideBtn" class="tb-btn user-only" onclick="startOverride()" style="display:none"></button>
+            <button id="forwardToggleBtn" class="forward-toggle-btn disabled" onclick="toggleForwarding()" disabled>⏳ Loading…</button>
+
+            <div class="menu-wrap">
+                <button class="tb-btn menu-btn" onclick="toggleMenu(event)" title="More">⋯</button>
+                <div id="barMenu" class="menu">
+                    <button class="menu-item admin-only" onclick="closeMenu();openConfig()">⚙️ Filters &amp; Settings</button>
+                    <button class="menu-item admin-only" onclick="closeMenu();openAdmin()">👥 Users &amp; Devices</button>
+                    <button class="menu-item admin-only" onclick="closeMenu();openHistory()">🕘 History</button>
+                    <div class="menu-sep"></div>
+                    <button class="menu-item" onclick="closeMenu();clearFilters()">✖️ Clear filters</button>
+                    <button class="menu-item" id="clearLogBtn" onclick="closeMenu();clearForwardLog()">📋 Clear forward log</button>
+                    <div class="menu-sep"></div>
+                    <!-- Destructive, and last, and the only red thing in here. -->
+                    <button class="menu-item menu-danger" onclick="closeMenu();clearAllMessages()">🗑️ Clear all messages</button>
+                    <button class="menu-item" onclick="closeMenu();doLogout()">↩︎ Logout</button>
                 </div>
-                <div class="bar-spacer"></div>
-                <!-- The target belongs WITH the three buttons it scopes. Admin
-                     only: a user can only ever command their own phones, so the
-                     control would be a lie for them. -->
-                <div class="cmd-group">
-                    <select class="filter-dropdown admin-only" id="commandTarget" title="Which phones the three buttons to the right act on">
-                        <option value="all">All users</option>
-                    </select>
-                    <button class="clear-log-btn" id="clearLogBtn" onclick="clearForwardLog()">📋 Clear Log</button>
-                    <button class="test-msg-btn" id="testMsgBtn" onclick="sendTestMessage()">📡 Test</button>
-                    <button class="test-msg-btn" id="fetchLatestBtn" onclick="fetchLatest()" title="Ask the device to forward its newest SMS — use when a code never arrived">📥 Get latest</button>
-                </div>
-                <button class="clear-all-btn danger" onclick="clearAllMessages()">🗑️ Clear All</button>
             </div>
         </div>
         <div class="grid-container">
@@ -465,7 +516,7 @@
     </div>
 
     <!-- CONFIG MODAL -->
-    <div id="configOverlay" class="config-overlay" onclick="if(event.target===this)closeConfig()">
+    <div id="configOverlay" class="config-overlay">
         <div class="config-modal">
             <h3>⚙️ Filters & Settings <button class="config-close" onclick="closeConfig()">✕</button></h3>
             <div class="config-section"><h4>Default OTP Patterns</h4><div id="defaultPatternsList"></div>
@@ -502,7 +553,7 @@
         </div>
     </div>
     <!-- USERS & DEVICES (admin) -->
-    <div id="adminOverlay" class="config-overlay" onclick="if(event.target===this)closeAdmin()">
+    <div id="adminOverlay" class="config-overlay">
         <div class="config-modal">
             <h3>👥 Users &amp; Devices <button class="config-close" onclick="closeAdmin()">✕</button></h3>
             <div id="adminNotice" class="config-error"></div>
@@ -518,7 +569,7 @@
     </div>
 
     <!-- HISTORY (admin) -->
-    <div id="historyOverlay" class="config-overlay" onclick="if(event.target===this)closeHistory()">
+    <div id="historyOverlay" class="config-overlay">
         <div class="config-modal">
             <h3>🕘 History <button class="config-close" onclick="closeHistory()">✕</button></h3>
             <div id="historyNotice" class="config-error"></div>
@@ -538,11 +589,17 @@
                     </select>
                     <input id="histSearch" placeholder="sender or number" oninput="renderHistory()">
                 </div>
+                <div class="hist-toolbar">
+                    <label class="hist-check"><input type="checkbox" id="histAll" onchange="toggleAllHistory(this)"> Select all shown</label>
+                    <span id="histSelCount" class="mono"></span>
+                    <div class="bar-spacer"></div>
+                    <button class="tb-btn hist-danger" id="histDelSel" onclick="deleteSelectedHistory()" disabled>Delete selected</button>
+                </div>
                 <div id="historyList" style="margin-top:10px"></div>
             </div>
-            <div class="config-section"><h4>Delete</h4>
+            <div class="config-section"><h4>Bulk delete</h4>
                 <div class="config-add">
-                    <input id="histOlderThan" type="number" min="0" value="30" style="max-width:110px">
+                    <input id="histOlderThan" type="number" min="1" value="30" style="max-width:110px">
                     <button onclick="deleteHistoryOlder()">Delete older than N days</button>
                 </div>
             </div>
@@ -838,9 +895,43 @@
 
     function setConnectionStatus(connected) {
         const el = document.getElementById('connectionStatus');
-        el.textContent = connected ? '✓ Connected' : '✗ Disconnected';
+        // The dot is drawn by CSS, so plain text is all this has to set.
+        el.textContent = connected ? 'Connected' : 'Disconnected';
         el.className = 'connection-status ' + (connected ? 'connected' : 'disconnected');
     }
+
+    /**
+     * The overflow menu.
+     *
+     * stopPropagation on the opening click, then a document listener to close —
+     * otherwise the same click that opens it immediately closes it again.
+     */
+    function toggleMenu(e) {
+        if (e) e.stopPropagation();
+        document.getElementById('barMenu').classList.toggle('open');
+    }
+    function closeMenu() {
+        document.getElementById('barMenu').classList.remove('open');
+    }
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.menu-wrap')) closeMenu();
+    });
+    /**
+     * Escape closes the top-most panel. A KEY PRESS is deliberate; a stray click
+     * on the backdrop is not, which is why click-to-dismiss was removed — it
+     * threw away half-typed filter patterns and unsaved settings for a mis-aimed
+     * click, and there is no undo for that.
+     */
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const menu = document.getElementById('barMenu');
+        if (menu.classList.contains('open')) { closeMenu(); return; }
+        for (const [id, fn] of [['historyOverlay', closeHistory],
+                                ['adminOverlay', closeAdmin],
+                                ['configOverlay', closeConfig]]) {
+            if (document.getElementById(id).classList.contains('open')) { fn(); return; }
+        }
+    });
 
     // ═══════════════════════════════════════════════════════════
     //  RENDER
@@ -1558,6 +1649,7 @@
 
     async function loadHistory() {
         try {
+            histSelected.clear();
             const user = document.getElementById('histUser').value;
             const [sum, list] = await Promise.all([
                 fetch('/api/history/summary?days=30', { headers: authHeaders() }),
@@ -1588,11 +1680,20 @@
         const el = document.getElementById('historyStrip');
         const days = sum.days || [];
         const max = Math.max(1, ...days.map(d => d.total));
+        // The fallback used to be a <div> INSIDE .strip, so it inherited the bar
+        // styling and rendered as one full-width green block with text on it.
+        // An empty state has to live outside the chart, not be shaped like a bar.
+        if (!days.length) {
+            el.innerHTML = '';
+            el.classList.add('strip-empty');
+            el.textContent = 'No archived messages yet';
+            return;
+        }
+        el.classList.remove('strip-empty');
         el.innerHTML = days.map(d =>
             `<div style="height:${Math.max(3, (d.total / max) * 100)}%;opacity:${
                 d.total && d.fetched / d.total < 0.5 ? '1' : '.6'}"
-                title="${esc(d.day)} — ${d.total} message(s), ${d.fetched} fetched"></div>`).join('')
-            || '<div class="mono">no data yet</div>';
+                title="${esc(d.day)} — ${d.total} message(s), ${d.fetched} fetched"></div>`).join('');
 
         const t = sum.totals || {};
         document.getElementById('historyTotals').innerHTML =
@@ -1619,19 +1720,87 @@
             const when = new Date(r.receivedAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
             const cls = r.outcome === 'fetched' ? 'pill-ok'
                       : r.outcome === 'superseded' ? 'pill-idle' : 'pill-off';
-            return `<div class="hist-row">
+            const on = histSelected.has(r.smsId);
+            // The id travels as a data attribute and never inside an inline
+            // handler — esc() escapes for HTML, not for a JS string.
+            return `<div class="hist-row${on ? ' sel' : ''}" data-hid="${esc(r.smsId)}">
+                <input type="checkbox" class="hist-cb" data-hid="${esc(r.smsId)}"${on ? ' checked' : ''}>
                 <span class="mono">${esc(when)}</span>
                 <span class="pill ${cls}">${esc(r.outcome)}</span>
                 <span class="mono">${esc(r.code || '—')}</span>
                 <span class="msg">${esc(r.sender)} → ${esc(r.deviceLabel || r.recipient)} · ${esc(r.message)}</span>
             </div>`;
         }).join('');
+        updateHistSelectionUI();
+    }
+
+    // ── Selecting individual messages ────────────────────────────
+    //
+    // Kept in a Set keyed by smsId rather than by row position, so a filter
+    // change or a reload does not silently move the selection onto different
+    // messages — which, for a delete button, would be the worst kind of bug.
+    const histSelected = new Set();
+
+    document.addEventListener('change', (e) => {
+        const cb = e.target.closest('.hist-cb');
+        if (!cb) return;
+        const id = cb.getAttribute('data-hid');
+        if (cb.checked) histSelected.add(id); else histSelected.delete(id);
+        const row = cb.closest('.hist-row');
+        if (row) row.classList.toggle('sel', cb.checked);
+        updateHistSelectionUI();
+    });
+
+    function toggleAllHistory(box) {
+        document.querySelectorAll('#historyList .hist-cb').forEach(cb => {
+            cb.checked = box.checked;
+            const id = cb.getAttribute('data-hid');
+            if (box.checked) histSelected.add(id); else histSelected.delete(id);
+            cb.closest('.hist-row').classList.toggle('sel', box.checked);
+        });
+        updateHistSelectionUI();
+    }
+
+    function updateHistSelectionUI() {
+        // Only count what is currently on screen: a selection carried over from
+        // a previous filter is not something the button should silently delete.
+        const shown = Array.from(document.querySelectorAll('#historyList .hist-cb'))
+            .map(cb => cb.getAttribute('data-hid'));
+        const n = shown.filter(id => histSelected.has(id)).length;
+        document.getElementById('histSelCount').textContent = n ? n + ' selected' : '';
+        document.getElementById('histDelSel').disabled = n === 0;
+        const all = document.getElementById('histAll');
+        all.checked = shown.length > 0 && n === shown.length;
+        all.indeterminate = n > 0 && n < shown.length;
+    }
+
+    async function deleteSelectedHistory() {
+        const shown = Array.from(document.querySelectorAll('#historyList .hist-cb'))
+            .map(cb => cb.getAttribute('data-hid'));
+        const ids = shown.filter(id => histSelected.has(id));
+        if (!ids.length) return;
+        if (!confirm('Delete ' + ids.length + ' archived message'
+            + (ids.length === 1 ? '' : 's') + '?\n\nThis cannot be undone.')) return;
+        try {
+            const res = await fetch('/api/history/delete', { method: 'POST', headers: authHeaders(),
+                body: JSON.stringify({ ids }) });
+            if (!res.ok) { historyNotice(await describeFailure(res), true); return; }
+            const d = await res.json();
+            ids.forEach(id => histSelected.delete(id));
+            historyNotice('Deleted ' + d.deleted + ' message' + (d.deleted === 1 ? '' : 's'), false);
+            await loadHistory();
+        } catch (e) { historyNotice('Could not reach the server', true); }
     }
 
     async function deleteHistoryOlder() {
         const days = parseInt(document.getElementById('histOlderThan').value, 10);
         if (!(days >= 0)) return;
-        if (!confirm('Delete every archived message older than ' + days + ' days?\n\nThis cannot be undone.')) return;
+        // 0 means "older than now", i.e. everything. Legitimate, but it must not
+        // read like the ordinary case — the field starts at 30 for a reason.
+        const what = days === 0
+            ? 'Delete the ENTIRE archive?\n\n0 days means everything, including today.'
+            : 'Delete every archived message older than ' + days + ' days?';
+        if (!confirm(what + '\n\nThis cannot be undone.')) return;
         try {
             const res = await fetch('/api/history/delete', { method: 'POST', headers: authHeaders(),
                 body: JSON.stringify({ olderThanDays: days }) });

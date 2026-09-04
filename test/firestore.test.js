@@ -466,6 +466,57 @@ const mk = ${fakeDb.toString()};
         'and must say why it did nothing');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 15. A FAILED IDENTITY READ MUST NOT DELETE EVERY USER ACCOUNT.
+//
+// Worse than the config version of this bug. users.load() CLEARS the maps, and
+// the caller ran it on a failed read too. Any change afterwards — a device
+// registering, which happens by itself with no operator involved — then wrote
+// the empty set back to Firestore.
+//
+// So one failed read at boot did not merely start empty: it PERMANENTLY DELETED
+// every user account, because the stored copy was the only one. Observed in
+// production.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    const users = require('../lib/users');
+    const firestore = require('../lib/firestore');
+
+    // Fresh process semantics are not available here, so exercise the guard
+    // directly: a module that has never had a successful load must refuse to
+    // persist, whatever asks it to.
+    let wrote = null;
+    users.setPersister(snap => { wrote = snap; });
+
+    // A device registering is the realistic trigger — nothing operator-driven.
+    users.registerDevice(null, { model: 'Galaxy A14' });
+    assert.strictEqual(wrote, null,
+        'NOTHING may be persisted before a successful load — writing an empty set '
+        + 'here is what deleted the accounts');
+
+    // After a successful load, writes are safe again. An empty stored state is
+    // fine: we then KNOW it is empty rather than unknown.
+    users.load({ users: [{ id: 'rahim', name: 'Rahim', active: true }], devices: [] });
+    assert.strictEqual(users.isLoaded(), true, 'a successful load unblocks writes');
+    users.registerDevice(null, { model: 'Redmi 12' });
+    assert.ok(wrote && wrote.users.some(u => u.id === 'rahim'),
+        'and the write carries the loaded accounts, not an empty set');
+
+    // The read itself must report failure distinctly, exactly like readConfig.
+    firestore._setDbForTests({
+        collection: () => ({ doc: () => ({ get: async () => { throw new Error('boom'); },
+                                           set: async () => {} }) })
+    });
+    return firestore.readIdentity().then(r => {
+        assert.strictEqual(r.ok, false,
+            'a failed identity read must be distinguishable from an empty one');
+        firestore._setDbForTests(null);
+        done();
+    });
+}
+
+function done() {
 console.log('ok — Firestore is off the OTP path (0 calls), config loads and falls back, '
     + "migration runs once, and in server.js's own require order the cold-start "
     + 'window cannot extract a wrong code');
+}

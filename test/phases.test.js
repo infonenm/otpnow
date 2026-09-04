@@ -293,6 +293,34 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
     assert.strictEqual(history.stats().queued, qBase,
         'but is NOT queued for the archive — it is something the system invented');
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Deleting individual archived messages by id.
+    // ─────────────────────────────────────────────────────────────────────────
+    res = await req('POST', '/api/history/delete',
+        { token: admin, body: { ids: ['some-archived-id'] } });   // archived[] was cleared above
+    assert.strictEqual(res.status, 200, 'admin can delete selected messages by id');
+    assert.strictEqual(typeof res.body.deleted, 'number', 'and is told how many went');
+
+    res = await req('POST', '/api/history/delete', { token: admin, body: {} });
+    assert.strictEqual(res.status, 400,
+        'a delete with neither ids nor an age is refused rather than guessed at');
+
+    res = await req('POST', '/api/history/delete',
+        { token: rahim2, body: { ids: ['anything'] } });
+    assert.strictEqual(res.status, 403, 'and it stays admin-only');
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // A stray click must not discard an open panel.
+    // ─────────────────────────────────────────────────────────────────────────
+    const fs2 = require('fs');
+    const html = fs2.readFileSync(__dirname + '/../public/index.html', 'utf8');
+    assert.ok(!/if\(event\.target===this\)/.test(html),
+        'click-to-dismiss threw away half-typed filter patterns for a mis-aimed click, '
+        + 'and there is no undo for that');
+    assert.ok(/class="hist-cb"/.test(html), 'history rows carry a selection checkbox');
+    assert.ok(!/onclick="[^"]*\$\{esc\(/.test(html),
+        'and the row id travels as a data attribute, never inside an inline handler');
+
     console.log('ok — override is per user and server-enforced, targeting needed no app '
         + 'change, and the archive only ever sees finished messages');
     process.exit(0);
