@@ -1,6 +1,6 @@
 {
   "name": "getotp-render-server",
-  "version": "4.30.0",
+  "version": "4.30.3",
   "description": "GetOTP Render Server - in-memory SMS/OTP store, SSE dashboard, FCM control",
   "main": "server.js",
   "scripts": {

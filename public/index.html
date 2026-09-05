@@ -415,6 +415,15 @@
         transform:translateY(-12px);opacity:0;
         transition:all .28s cubic-bezier(0.34,1.56,0.64,1);
         z-index:1000;font-size:13.5px;font-weight:500;max-width:340px;
+        /* AN INVISIBLE ELEMENT STILL CAPTURES THE POINTER.
+           This sits fixed at top-right, z-index 1000, opacity 0 — directly over
+           the ⚙ at the right-hand end of the top bar, and above it. So the
+           cursor never became a hand and clicks landed on a toast nobody could
+           see. Intermittent only because whether they overlap depends on the
+           window width: .dashboard is max-width 1600px and centred, so on a wide
+           window the gear sits clear of the toast and on a narrower one it does
+           not. A toast is never clicked; it has no business intercepting one. */
+        pointer-events:none;
     }
     .notification.show{transform:translateY(0);opacity:1}
 
@@ -855,20 +864,20 @@
         eventSource.addEventListener('sms_new', e => {
             const sms = JSON.parse(e.data);
             allMessages[sms.id] = sms;
-            renderAll();
+            scheduleRender();
             notify('📩 SMS from ' + sms.sender);
         });
 
         eventSource.addEventListener('sms_update', e => {
             const sms = JSON.parse(e.data);
             allMessages[sms.id] = sms;
-            renderAll();
+            scheduleRender();
         });
 
         eventSource.addEventListener('sms_delete', e => {
             const d = JSON.parse(e.data);
             const card = document.querySelector(`[data-id="${d.id}"]`);
-            if (card) { card.classList.add('expiring'); setTimeout(() => { delete allMessages[d.id]; renderAll(); }, 600); }
+            if (card) { card.classList.add('expiring'); setTimeout(() => { delete allMessages[d.id]; scheduleRender(); }, 600); }
             else { delete allMessages[d.id]; renderAll(); }
         });
 
@@ -1101,6 +1110,22 @@
     // ═══════════════════════════════════════════════════════════
     //  RENDER
     // ═══════════════════════════════════════════════════════════
+    /**
+     * Coalesce a burst of SSE events into one repaint.
+     *
+     * renderAll() rebuilds both lists' innerHTML and restarts the 1s expiry
+     * timer. The auto-delete sweep emits a run of sms_delete events in one tick,
+     * so a full rebuild fired for each of them. Fine at today's volume; it is
+     * the kind of thing that degrades quietly as message counts grow, and one
+     * frame of batching costs nothing.
+     */
+    let renderQueued = false;
+    function scheduleRender() {
+        if (renderQueued) return;
+        renderQueued = true;
+        requestAnimationFrame(() => { renderQueued = false; renderAll(); });
+    }
+
     function renderAll() {
         const searchVal = (document.getElementById('searchInput').value || '').toLowerCase();
         const filterVal = document.getElementById('numberFilter').value;

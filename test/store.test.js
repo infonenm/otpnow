@@ -171,7 +171,17 @@ console.log = realLog;
 
     const mine = store.getAllSms().filter(m => m.recipient === N);
     assert.strictEqual(mine.length, 2, 'the replay is still STORED — it is evidence');
-    assert.ok(mine.some(m => m.stale), 'and marked stale so it can never be served');
+    assert.ok(mine.some(m => m.stale), 'and marked stale');
+
+    // ...but a stale message on its own IS still delivered. Excluding it
+    // entirely (4.29.0) turned "cannot overwrite a fresher code" into "cannot be
+    // delivered at all", in exactly the case QueueFlusher's 5-minute replay
+    // window exists for: a cold start delayed the push and nothing else came.
+    const LONE = '01799005566';
+    store.addSms('IVAC', LONE, 'Your OTP is 778899', Date.now() - 3 * 60 * 1000);
+    assert.strictEqual(store.getOtp(LONE), '778899',
+        'a delayed replay with nothing to compete against must still be served — '
+        + 'refusing it is a missed OTP, which is the failure this system exists to avoid');
 
     // A device clock skewed into the past must not silence a real message — the
     // same fail-open rule SmsReceiver applies to the SMSC timestamp.

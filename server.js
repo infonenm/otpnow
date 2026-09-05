@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.30.0
+ * server.js — GetOTP Render Server v4.30.3
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -276,13 +276,19 @@ app.post('/sms', requireApiKey, (req, res) => {
     // app is answered with below, so enforcement and instruction cannot differ.
     if (!store.forwardingFor(deviceId)) {
         console.log(`[server] Declined SMS from ${sender} — forwarding is OFF`);
-        return res.json({ success: true, ignored: true, globalForwarding: false });
+        // globalRaw travels with EVERY state the app is told, not just the poll.
+        // Sending only the effective value made an override look like an admin
+        // toggle — see the note on globalRaw in /api/settings.
+        return res.json({ success: true, ignored: true,
+                          globalForwarding: false,
+                          globalRaw: store.isForwardingEnabled() });
     }
 
     if (deviceId) store.users.touchDevice(deviceId);
     const result = store.addSms(sender, recipient || 'Unknown', message,
                                 arrivedAt || Date.now(), deviceId);
-    res.json({ success: true, id: result.id, code: result.code || null, globalForwarding: true });
+    res.json({ success: true, id: result.id, code: result.code || null,
+               globalForwarding: true, globalRaw: store.isForwardingEnabled() });
 });
 
 // 2. OTP FETCH API — replaces Cloudflare Worker + Apps Script 2
@@ -346,9 +352,19 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // no Play Services, so a command that only rode FCM would silently not
         // work on exactly the devices most likely to have missed the SMS.
         fetchLatestTs:    cmds.fetchLatestTs,
-        // Dynamic allowlist. The app enforces it against this PLUS its own
-        // compiled-in host, which no remote list can remove.
-        allowedHosts:     store.usersEnabled() ? store.users.getAllowedHosts() : [],
+        // OMITTED when unconfigured, rather than sent as [].
+        //
+        // The app treats an empty list as "not configured" and allows any host —
+        // deliberately, so an older server that sends no list cannot brick a
+        // phone. But this endpoint sent an explicit [] whenever the list was
+        // unset OR users were switched off, which is indistinguishable from
+        // that, and it also CLEARED a list a phone had already been given. So
+        // turning USERS_ENABLED off silently un-configured every phone.
+        //
+        // Absent = "I have nothing to say, keep what you have".
+        // Present = "this is the list, enforce it".
+        ...(store.usersEnabled() && store.users.getAllowedHosts().length
+              ? { allowedHosts: store.users.getAllowedHosts() } : {}),
         // Which user owns this device, so the app can join that FCM topic and
         // admin targeting can reach some phones and not others.
         userId:           (store.usersEnabled() && req.query.deviceId
@@ -469,7 +485,7 @@ app.post('/api/login', asyncRoute(async (req, res) => {
     if (!password) return res.status(400).json({ error: 'Missing password' });
 
     // username absent = admin, which is exactly today's behaviour.
-    const token = store.login(password, username);
+    const token = await store.login(password, username);
     if (!token) {
         const delay = Math.min(100 * Math.pow(2, loginFailures), LOGIN_MAX_DELAY_MS);
         loginFailures++;
@@ -497,7 +513,7 @@ let enrollFailures = 0;
 app.post('/api/set-password', asyncRoute(async (req, res) => {
     if (!store.usersEnabled()) return res.status(404).json({ error: 'Users are not enabled' });
     const { username, code, password } = req.body || {};
-    const r = store.users.setPassword(username, code, password);
+    const r = await store.users.setPassword(username, code, password);
 
     if (!r.ok) {
         // Same back-off as /api/login, and for the same reason: an enrollment
@@ -629,10 +645,14 @@ app.post('/api/override', usersGate, requireToken, (req, res) => {
     const r = store.startOverride(target, minutes);
     if (!r.ok) return res.status(400).json({ error: r.error });
 
-    // FCM so their phones hear it now rather than within 30s. Reusing the
-    // enable action: from a device's point of view this IS an enable, and the
-    // server remains the authority on when it ends.
-    fcm.send('enable', Date.now(), 'user_' + target);
+    // A DISTINCT ACTION, not 'enable'.
+    //
+    // It reused 'enable', and the push handler treats enable/disable as "the
+    // admin toggled the dashboard" — which clears local_opt_out. So starting
+    // your own override switched your phone back on even if you had
+    // deliberately switched it off AT the phone. 'override_on' says what it is:
+    // forward now, but the global switch has NOT moved.
+    fcm.send('override_on', Date.now(), 'user_' + target);
     res.json({ success: true, expiresAt: r.expiresAt, minutes: r.minutes,
                clamped: r.clamped, ceiling: store.overrideCeilingMinutes() });
 });
@@ -642,7 +662,7 @@ app.post('/api/override/cancel', usersGate, requireToken, (req, res) => {
     const target = (req.session.role === 'admin' && userId)
         ? store.users.slug(userId) : req.session.userId;
     store.cancelOverride(target);
-    if (!store.isForwardingEnabled()) fcm.send('disable', Date.now(), 'user_' + target);
+    if (!store.isForwardingEnabled()) fcm.send('override_off', Date.now(), 'user_' + target);
     res.json({ success: true });
 });
 

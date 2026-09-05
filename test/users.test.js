@@ -298,10 +298,32 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
         '/get resolves by number alone, exactly as before');
 
     // ── Passwords are hashed, never stored or returned ───────────────────────
-    const hash = users.hashPassword('correct horse battery staple');
+    // ASYNC since 4.30.2 — scryptSync blocks the event loop for ~37ms, and that
+    // loop also serves /get. Awaiting here is the point, not an inconvenience.
+    const hash = await users.hashPassword('correct horse battery staple');
     assert.ok(hash.startsWith('scrypt$'), 'scrypt, from the standard library — no new dependency');
-    assert.ok(users.verifyPassword('correct horse battery staple', hash));
-    assert.ok(!users.verifyPassword('wrong', hash));
+    assert.ok(await users.verifyPassword('correct horse battery staple', hash));
+    assert.ok(!await users.verifyPassword('wrong', hash));
+
+    // An unknown user must cost the same as a real one, or the timing tells an
+    // attacker which usernames exist.
+    const t0 = Date.now(); await users.authenticate('definitely-not-a-user', 'x');
+    const unknownMs = Date.now() - t0;
+    const t1 = Date.now(); await users.authenticate('rahim', 'wrong-password');
+    const knownMs = Date.now() - t1;
+    // Nothing on the OTP path may call the SYNCHRONOUS form. This is a source
+    // check because the cost only shows up under concurrency, and a future edit
+    // that reaches for scryptSync would look harmless in review.
+    const fsMod = require('fs');
+    const usersSrc = fsMod.readFileSync(__dirname + '/../lib/users.js', 'utf8');
+    const codeOnly = usersSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    assert.ok(!/scryptSync/.test(codeOnly),
+        'scryptSync blocks the event loop for ~37ms and that loop also serves /get — '
+        + 'use the async crypto.scrypt');
+
+    assert.ok(unknownMs > 5,
+        'an unknown user must still pay the hashing cost — returning instantly is a '
+        + `username oracle (unknown ${unknownMs}ms vs known ${knownMs}ms)`);
     res = await req('GET', '/api/users', { token: adminToken });
     assert.ok(!res.raw.includes('scrypt$'), 'a password hash must never leave the server');
 
