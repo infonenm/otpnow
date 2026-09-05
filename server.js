@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.28.0
+ * server.js — GetOTP Render Server v4.29.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -217,8 +217,11 @@ function requireGetKey(req, res, next) {
  * Firestore is never consulted on a request path.
  */
 function requireToken(req, res, next) {
+    // HEADER ONLY. ?token= used to be accepted for every endpoint because the
+    // SSE stream needed it; the stream now uses a single-use ticket instead, so
+    // a long-lived session token never appears in a URL — or in a proxy log.
     const auth  = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : (req.query.token || '');
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
     const session = store.getSession(token);
     if (!session) return res.status(401).json({ error: 'Unauthorized' });
     req.session = session;
@@ -326,9 +329,14 @@ app.get('/api/settings', requireApiKey, (req, res) => {
     if (req.query.deviceId) store.users.touchDevice(req.query.deviceId);
     const cmds = store.commandsFor(req.query.deviceId);
     res.json({
-        // The EFFECTIVE answer for this device, not the raw global flag. The app
-        // is told what to do; it never computes policy (I10).
+        // The EFFECTIVE answer for this device — what it should DO.
         globalForwarding: store.forwardingFor(req.query.deviceId),
+        // ...and the RAW global switch, which is what a "dashboard transition"
+        // means. The app used to see only the effective value and treat every
+        // change of it as an admin toggle, so a user starting or expiring their
+        // own override silently cleared a deliberate local opt-out on their
+        // phones. Two meanings, two fields.
+        globalRaw:        store.isForwardingEnabled(),
         // Per device: the newer of the broadcast timestamp and this owner's.
         // RemoteCommands already de-duplicates by timestamp, so targeting
         // needed no app change at all.
@@ -452,7 +460,7 @@ const LOGIN_MAX_DELAY_MS = 5000;
 // so a copied token stayed valid forever.
 app.post('/api/logout', requireToken, (req, res) => {
     const h = req.headers.authorization || '';
-    store.revokeToken(h.startsWith('Bearer ') ? h.slice(7) : (req.query.token || ''));
+    store.revokeToken(h.startsWith('Bearer ') ? h.slice(7) : '');
     res.json({ success: true });
 });
 
@@ -517,8 +525,15 @@ app.get('/api/messages', requireToken, (req, res) => {
 });
 
 // SSE real-time stream
-app.get('/api/stream', requireToken, (req, res) => {
-    store.addSSEClient(res, req.session);
+// One ticket, one stream, thirty seconds.
+app.get('/api/stream-ticket', requireToken, (req, res) => {
+    res.json({ ticket: store.issueStreamTicket(req.session) });
+});
+
+app.get('/api/stream', (req, res) => {
+    const session = store.redeemStreamTicket(req.query.ticket);
+    if (!session) return res.status(401).json({ error: 'Invalid or expired stream ticket' });
+    store.addSSEClient(res, session);
 });
 
 // Toggle forwarding
@@ -658,6 +673,10 @@ app.post('/api/filters', requireAdmin, (req, res) => {
     const problems = [];
     for (const rule of filters) {
         const label = (rule && rule.phoneNumber) || '(unnamed)';
+        // Patterns were validated exhaustively and the NAME never was — so a
+        // rule with a blank name saved cleanly and then claimed every sender.
+        const ruleProblem = otp.validateRule(rule);
+        if (ruleProblem) { problems.push(`${label}: ${ruleProblem}`); continue; }
         const pats = (rule && rule.patterns) || [];
         if (!Array.isArray(pats) || pats.length === 0) {
             problems.push(`${label}: no patterns`);
@@ -787,10 +806,12 @@ app.post('/api/set-url', usersGate, requireAdmin, (req, res) => {
 //
 // The boot read retries on its own, but when a load has been failing you want to
 // be able to say "try now" and watch, rather than wait out a backoff and wonder.
-app.post('/api/reload', requireAdmin, (req, res) => {
-    store.reloadDurable();
+app.post('/api/reload', requireAdmin, asyncRoute(async (req, res) => {
+    // Awaited: the flush inside must complete before we answer, or the dashboard
+    // refreshes against a state the reload has not finished producing.
+    await store.reloadDurable();
     res.json({ success: true });
-});
+}));
 
 app.get('/api/devices', usersGate, requireAdmin, (req, res) => {
     res.json({ devices: store.users.listDevices() });
@@ -846,6 +867,7 @@ app.post('/api/register', requireApiKey, (req, res) => {
     }
     const { deviceId, model, name, claimedUser } = req.body || {};
     const device = store.users.registerDevice(deviceId, { model, name, claimedUser });
+    if (device && device.error) return res.status(400).json({ error: device.error });
     res.json({
         success: true, usersEnabled: true,
         deviceId: device.id,
@@ -976,12 +998,16 @@ app.get('/api/full-settings', requireToken, (req, res) => {
 // every request that reaches it, so mounting it first made every /get and /sms
 // pay for a lookup of a file that was never going to exist. Nothing above
 // handles '/', so the dashboard still serves from here exactly as before.
-app.use(express.static(path.join(__dirname, 'public')));
-
-
+// ABOVE the static handler, despite what the note above says about mounting
+// static last. A file called public/health would otherwise shadow the keepalive
+// endpoint — harmless today, and a genuinely confusing outage the day someone
+// adds one. /health is one comparison; the ordering argument was about the
+// filesystem stat that /sms and /get would pay for, and this route is neither.
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', uptime: process.uptime() | 0 });
 });
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 
 // ═════════════════════════════════════════════════════════════════

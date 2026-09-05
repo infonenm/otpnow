@@ -522,7 +522,7 @@
             <button id="forwardToggleBtn" class="forward-toggle-btn disabled admin-only" onclick="toggleForwarding()" disabled>⏳ …</button>
 
             <div class="menu-wrap">
-                <button class="tb-btn menu-btn" onclick="toggleMenu(event)" title="Menu" aria-label="Menu">⚙</button>
+                <button class="tb-btn menu-btn" id="menuBtn" type="button" title="Menu" aria-label="Menu" aria-expanded="false" aria-haspopup="true">⚙</button>
                 <div id="barMenu" class="menu">
                     <button class="menu-item admin-only" onclick="closeMenu();openConfig()">🔧 Filters</button>
                     <button class="menu-item admin-only" onclick="closeMenu();openAdmin()">👥 Users</button>
@@ -771,7 +771,8 @@
         try { await fetch('/api/logout', { method: 'POST', headers: authHeaders() }); } catch (e) { }
         token = '';
         localStorage.removeItem('getotp_token');
-        sessionStorage.removeItem('getotp_pw');
+        // (A sessionStorage 'getotp_pw' key used to be cleared here. Nothing has
+        // written it since the password stopped being stored client-side.)
         if (eventSource) { eventSource.close(); eventSource = null; }
         allMessages = {};
         showLogin();
@@ -824,9 +825,18 @@
     // ═══════════════════════════════════════════════════════════
     let sseRetryCount = 0;
 
-    function connectSSE() {
+    async function connectSSE() {
         if (eventSource) eventSource.close();
-        eventSource = new EventSource('/api/stream?token=' + token);
+        // A single-use ticket rather than the session token: EventSource cannot
+        // set headers, and a URL ends up in proxy logs.
+        let ticket;
+        try {
+            const res = await fetch('/api/stream-ticket', { headers: authHeaders() });
+            if (!res.ok) { setConnectionStatus(false); return; }
+            ticket = (await res.json()).ticket;
+        } catch (e) { setConnectionStatus(false); return; }
+
+        eventSource = new EventSource('/api/stream?ticket=' + encodeURIComponent(ticket));
 
         eventSource.addEventListener('sms_new', e => {
             const sms = JSON.parse(e.data);
@@ -1000,15 +1010,62 @@
      * stopPropagation on the opening click, then a document listener to close —
      * otherwise the same click that opens it immediately closes it again.
      */
-    function toggleMenu(e) {
-        if (e) e.stopPropagation();
-        document.getElementById('barMenu').classList.toggle('open');
+    // ═══════════════════════════════════════════════════════════
+    //  THE MENU BUTTON, REWRITTEN TO REMOVE TWO WAYS IT COULD MISS
+    //
+    //  Reported as "sometimes the gear doesn't work", and not reproducible
+    //  here — so rather than guess at one cause, both plausible ones are gone:
+    //
+    //  1. A `click` only fires on a button when the press AND the release land
+    //     on it. Move the pointer a few pixels between the two — easy on a
+    //     trackpad, easier on a phone — and the event fires on a common
+    //     ancestor instead, the inline handler never runs, and the button
+    //     appears dead. Toggling on POINTERDOWN removes that entirely.
+    //
+    //  2. It relied on stopPropagation from an inline handler to stop the
+    //     outside-click listener closing what had just opened. Anything that
+    //     handled the event earlier, or any future listener, would have broken
+    //     it in a way that looked intermittent. The toggle and the
+    //     outside-close are now the same delegated handler, so they cannot
+    //     race: whatever opens it is by definition not "outside".
+    //
+    //  Keyboard still works: a focused button fires `click` without
+    //  `pointerdown`, so that path is handled too, guarded so a mouse press
+    //  does not toggle twice.
+    // ═══════════════════════════════════════════════════════════
+
+    let menuHandledByPointer = false;
+
+    function setMenuOpen(open) {
+        const menu = document.getElementById('barMenu');
+        const btn  = document.getElementById('menuBtn');
+        menu.classList.toggle('open', open);
+        if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
     }
-    function closeMenu() {
-        document.getElementById('barMenu').classList.remove('open');
+
+    function toggleMenu() {
+        setMenuOpen(!document.getElementById('barMenu').classList.contains('open'));
     }
-    document.addEventListener('click', (e) => {
+
+    function closeMenu() { setMenuOpen(false); }
+
+    document.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('#menuBtn')) {
+            menuHandledByPointer = true;
+            toggleMenu();
+            return;
+        }
+        // Anywhere outside the menu and its button closes it. Inside the menu,
+        // the item's own handler closes it after doing its job.
         if (!e.target.closest('.menu-wrap')) closeMenu();
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#menuBtn')) return;
+        // A pointer press already handled this; only a keyboard activation
+        // reaches here without one.
+        if (menuHandledByPointer) { menuHandledByPointer = false; return; }
+        toggleMenu();
     });
     /**
      * Escape closes the top-most panel. A KEY PRESS is deliberate; a stray click

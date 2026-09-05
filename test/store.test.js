@@ -152,6 +152,35 @@ assert.ok(smsMap.size <= CAP, `size cap must hold: ${smsMap.size} > ${CAP}`);
 assertIndexConsistent('size cap eviction');
 
 console.log = realLog;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A STALE REPLAY MUST NOT TAKE OVER THE LIVE OTP.
+//
+// QueueFlusher replays a message for up to 5 minutes on purpose, so one delayed
+// by a cold start still arrives. The server had no matching guard: addSms
+// superseded unconditionally and stamped a fresh receivedAt, so a 4-minute-old
+// replay became the live code AND got another 2 minutes of life as the current
+// one. Verified before the fix: /get returned the replay, not the real code.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    const N = '01799001122';
+    store.addSms('IVAC', N, 'Your OTP is 445566', Date.now());
+    store.addSms('IVAC', N, 'Your OTP is 111111', Date.now() - 4 * 60 * 1000);
+    assert.strictEqual(store.getOtp(N), '445566',
+        'a 4-minute-old replay must not supersede the code that just arrived');
+
+    const mine = store.getAllSms().filter(m => m.recipient === N);
+    assert.strictEqual(mine.length, 2, 'the replay is still STORED — it is evidence');
+    assert.ok(mine.some(m => m.stale), 'and marked stale so it can never be served');
+
+    // A device clock skewed into the past must not silence a real message — the
+    // same fail-open rule SmsReceiver applies to the SMSC timestamp.
+    const N2 = '01799003344';
+    store.addSms('IVAC', N2, 'Your OTP is 222222', Date.now() - 40 * 3600 * 1000);
+    assert.strictEqual(store.getOtp(N2), '222222',
+        'an implausible device timestamp is not trusted, so the message still counts');
+}
+
 console.log(`ok — index consistent across ${step} checks; cap, supersede and `
             + `unconsume verified`);
 process.exit(0);

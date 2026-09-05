@@ -59,10 +59,19 @@ firestore.init = function () {
         };
         return q;
     };
+    // Documents PERSIST in this Map. A stub whose set() writes to nothing cannot
+    // catch a read-after-write bug — and the reload race below is exactly that.
+    const store = new Map();
     firestore._setDbForTests({
         batch: () => ({ set: (ref, v) => archived.push(v), delete: () => {}, commit: async () => {} }),
-        collection: () => Object.assign(query(), {
-            doc: () => ({ get: async () => ({ exists: false }), set: async () => {} })
+        collection: (c) => Object.assign(query(), {
+            doc: (id) => ({
+                get: async () => {
+                    const d = store.get(c + '/' + id);
+                    return { exists: !!d, data: () => d };
+                },
+                set: async (v) => { store.set(c + '/' + id, v); }
+            })
         })
     });
 };
@@ -333,9 +342,15 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
         const rahimTok = (await req('POST', '/api/login',
             { body: { username: 'rahim', password: 'rahim-password' } })).body.token;
 
+        // The stream now takes a single-use ticket, not the session token —
+        // EventSource cannot set headers and a URL ends up in proxy logs.
+        const ticket = (await req('GET', '/api/stream-ticket',
+            { token: rahimTok })).body.ticket;
+        assert.ok(ticket, 'a signed-in caller can obtain a stream ticket');
+
         const seen = [];
         const streamReq = require('http').get(
-            BASE + '/api/stream?token=' + rahimTok, (r) => {
+            BASE + '/api/stream?ticket=' + ticket, (r) => {
                 r.on('data', c => seen.push(String(c)));
             });
         await new Promise(r => setTimeout(r, 300));
@@ -354,9 +369,44 @@ function req(method, urlPath, { body, token, apiKey } = {}) {
         const stream = seen.join('');
         assert.ok(stream.includes('979797'),
             "a user must still receive their OWN messages live");
+        // A ticket is single use: replaying it must fail.
+        const replay = await new Promise(resolve => {
+            require('http').get(BASE + '/api/stream?ticket=' + ticket,
+                r => resolve(r.statusCode)).on('error', () => resolve(0));
+        });
+        assert.strictEqual(replay, 401, 'a stream ticket dies on use');
+
         assert.ok(!stream.includes('989898'),
             "AND MUST NOT RECEIVE ANOTHER USER'S. The stream carried full text and "
             + 'codes to every logged-in client.');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // A RELOAD MUST NOT OVERTAKE THE WRITE IT IS ABOUT TO OVERWRITE.
+    //
+    // Found by probing the endpoints in order: after POST /api/reload, every
+    // request from a user's session answered 401 — because the account it
+    // belonged to had been erased from memory. Writes are debounced 2s, so
+    // re-reading inside that window returns the document as it was BEFORE the
+    // user was created, and users.load() replaces memory with it.
+    //
+    // And loadedOk stays true through a reload, so the next ordinary change
+    // would have written that emptier state back as fact.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+        await req('POST', '/api/users', { token: admin, body: { name: 'Fragile' } });
+        assert.ok(store.users.listUsers().some(u => u.id === 'fragile'),
+            'the user exists in memory immediately');
+
+        // Immediately — inside the debounce window.
+        res = await req('POST', '/api/reload', { token: admin });
+        assert.strictEqual(res.status, 200);
+        await new Promise(r => setTimeout(r, 300));
+
+        assert.ok(store.users.listUsers().some(u => u.id === 'fragile'),
+            'AND SURVIVES A RELOAD ISSUED INSIDE THE WRITE DEBOUNCE. The reload must '
+            + 'flush pending writes before it re-reads, or it re-reads a document that '
+            + 'predates the change and erases it.');
     }
 
     console.log('ok — override is per user and server-enforced, targeting needed no app '
