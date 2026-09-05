@@ -515,6 +515,36 @@ const mk = ${fakeDb.toString()};
     });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 16. A FIRESTORE OUTAGE MUST NOT LOOK LIKE DELETION.
+//
+// Four times, config and users "disappeared" after a deploy. Every time the data
+// was in Firestore and the boot read had failed. Config has had a state-file
+// cache since 4.20.0 and identity had NONE — so a failed identity read left the
+// system with no users at all, which is indistinguishable from deletion.
+//
+// The cache serves; it does not authorise. loadCache leaves the state read-only,
+// so a cache we are not sure is current can never overwrite Firestore.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    const users = require('../lib/users');
+    users.load({ users: [{ id: 'a', name: 'A', active: true }], devices: [] });
+    assert.strictEqual(users.isLoaded(), true, 'a real load authorises writes');
+
+    users.loadCache({ users: [{ id: 'cached', name: 'Cached', active: true }], devices: [] });
+    assert.ok(users.listUsers().some(u => u.id === 'cached'),
+        'the cache is SERVED — the dashboard works and people can sign in');
+    assert.strictEqual(users.isLoaded(), false,
+        'but it does NOT authorise writes: a cache that may be stale must never '
+        + 'overwrite Firestore');
+
+    let wrote = null;
+    users.setPersister(s => { wrote = s; });
+    users.createUser('Nope');
+    assert.strictEqual(wrote, null,
+        'and a change made while serving from cache is not persisted');
+}
+
 function done() {
 console.log('ok — Firestore is off the OTP path (0 calls), config loads and falls back, '
     + "migration runs once, and in server.js's own require order the cold-start "

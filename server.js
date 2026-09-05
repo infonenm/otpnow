@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.29.0
+ * server.js — GetOTP Render Server v4.30.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -715,6 +715,26 @@ function usersGate(req, res, next) {
     next();
 }
 
+/**
+ * Refuse a change that could not be saved.
+ *
+ * While the identity load has never succeeded, markDirty() correctly refuses to
+ * persist — so creating a user "worked", appeared on screen, and vanished at the
+ * next restart. Silently. Accepting an edit you cannot keep is worse than
+ * refusing it, because the operator walks away believing it is done.
+ */
+function requireIdentityLoaded(req, res, next) {
+    if (!store.users.isLoaded()) {
+        return res.status(503).json({
+            error: 'User data has not loaded from Firestore yet, so changes cannot be '
+                 + 'saved and would be lost at the next restart. Your existing accounts '
+                 + 'are safe in Firestore. Open Settings > Config storage and press '
+                 + 'Retry now, or wait — it retries by itself.'
+        });
+    }
+    next();
+}
+
 app.get('/api/users', usersGate, requireAdmin, (req, res) => {
     res.json({ users: store.users.listUsers(), stats: store.users.stats() });
 });
@@ -722,7 +742,7 @@ app.get('/api/users', usersGate, requireAdmin, (req, res) => {
 // Create a user. The enrollment code is returned ONCE, here. Hand it over out
 // of band; it is what stops a passwordless account being claimed by whoever
 // learns the username.
-app.post('/api/users', usersGate, requireAdmin, (req, res) => {
+app.post('/api/users', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const { name } = req.body || {};
     const r = store.users.createUser(name);
     if (!r.ok) return res.status(400).json({ error: r.error });
@@ -731,7 +751,7 @@ app.post('/api/users', usersGate, requireAdmin, (req, res) => {
 
 // Reissue a code. The existing password stops working immediately — this is
 // both the reset path and the "they forgot it" path.
-app.post('/api/users/:id/reissue', usersGate, requireAdmin, (req, res) => {
+app.post('/api/users/:id/reissue', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const r = store.users.reissueCode(req.params.id);
     if (!r.ok) return res.status(404).json({ error: r.error });
     store.revokeSessionsFor(store.users.slug(req.params.id));
@@ -744,7 +764,7 @@ app.post('/api/users/:id/reissue', usersGate, requireAdmin, (req, res) => {
 // responding mid-click rather than at token expiry. Their DEVICES keep
 // forwarding and their messages file to admin — nothing stops arriving while
 // you work out who should own that phone.
-app.post('/api/users/:id/active', usersGate, requireAdmin, (req, res) => {
+app.post('/api/users/:id/active', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const { active } = req.body || {};
     if (typeof active !== 'boolean') return res.status(400).json({ error: 'active must be boolean' });
     const r = store.users.setActive(req.params.id, active);
@@ -757,7 +777,7 @@ app.post('/api/users/:id/active', usersGate, requireAdmin, (req, res) => {
 // delete on a live system takes phones off their owner instantly and has no
 // undo. History is NOT rewritten — a message records what happened when it
 // happened, and keeps the userId it was stamped with.
-app.post('/api/users/:id/purge', usersGate, requireAdmin, (req, res) => {
+app.post('/api/users/:id/purge', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const id = store.users.slug(req.params.id);
     const r = store.users.purgeUser(id);
     if (!r.ok) return res.status(404).json({ error: r.error });
@@ -817,20 +837,20 @@ app.get('/api/devices', usersGate, requireAdmin, (req, res) => {
     res.json({ devices: store.users.listDevices() });
 });
 
-app.post('/api/devices/:id/assign', usersGate, requireAdmin, (req, res) => {
+app.post('/api/devices/:id/assign', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const { userId } = req.body || {};
     const r = store.users.assignDevice(req.params.id, userId === null ? null : userId);
     if (!r.ok) return res.status(400).json({ error: r.error });
     res.json({ success: true, device: r.device });
 });
 
-app.post('/api/devices/:id/rename', usersGate, requireAdmin, (req, res) => {
+app.post('/api/devices/:id/rename', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const r = store.users.renameDevice(req.params.id, (req.body || {}).name);
     if (!r.ok) return res.status(404).json({ error: r.error });
     res.json({ success: true, device: r.device });
 });
 
-app.post('/api/devices/:id/remove', usersGate, requireAdmin, (req, res) => {
+app.post('/api/devices/:id/remove', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const r = store.users.removeDevice(req.params.id);
     if (!r.ok) return res.status(404).json({ error: 'No such device' });
     res.json({ success: true });
@@ -846,7 +866,7 @@ app.get('/api/allowed-hosts', usersGate, requireAdmin, (req, res) => {
     res.json({ hosts: store.users.getAllowedHosts() });
 });
 
-app.post('/api/allowed-hosts', usersGate, requireAdmin, (req, res) => {
+app.post('/api/allowed-hosts', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const r = store.users.setAllowedHosts((req.body || {}).hosts);
     if (!r.ok) return res.status(400).json({ error: r.error });
     res.json({ success: true, hosts: r.hosts });

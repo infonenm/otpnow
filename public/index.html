@@ -112,6 +112,14 @@
        most important thing to be sure of before you press anything — an admin
        action taken while you thought you were a user, or the reverse, is a
        confusing five minutes. So it is tinted rather than grey. */
+    .load-banner{
+        display:none;margin-bottom:16px;padding:14px 18px;
+        background:var(--red-dim);border:1px solid var(--red-line);
+        border-radius:var(--radius);color:var(--red);font-size:13px;line-height:1.6;
+    }
+    .load-banner.show{display:block}
+    .load-banner b{color:var(--red)}
+    .load-banner button{margin-top:10px}
     .whoami{
         display:inline-flex;align-items:center;gap:5px;
         font-family:var(--mono);font-size:11.5px;font-weight:600;
@@ -536,6 +544,11 @@
                 </div>
             </div>
         </div>
+        <!-- Impossible to miss. A failed Firestore load used to be visible only
+             inside the Settings modal, so it looked exactly like the data had
+             been deleted — four times. -->
+        <div id="loadBanner" class="load-banner"></div>
+
         <div class="grid-container">
             <div class="section">
                 <div class="section-header">
@@ -807,6 +820,7 @@
                 historyStats = s.history || null;
                 if (s.me) me = s.me;
                 applyRole();
+                renderLoadBanner();
                 updateToggleBtn();
             }
 
@@ -1333,6 +1347,7 @@
             if (s.me) me = s.me;
             renderFcmStatus();
             renderConfigStatus();
+            renderLoadBanner();
             renderOverrideButton();
             if (me.role === 'admin') fillTargetDropdown();
         } catch (e) { /* the cached value stays on screen */ }
@@ -1345,6 +1360,38 @@
      * expect: `env defaults` means the catch-all is live, which is the state
      * that silently costs OTPs.
      */
+    /**
+     * The one message that must never be buried in a modal.
+     *
+     * If a load has not succeeded, the dashboard is showing env defaults and an
+     * empty roster while Firestore still holds everything — and that is
+     * indistinguishable from deletion unless it says so, on the page, in red.
+     */
+    function renderLoadBanner() {
+        const el = document.getElementById('loadBanner');
+        if (!el) return;
+        const load = (configStatus && configStatus.load) || null;
+        const fsOn = configStatus && configStatus.firestore && configStatus.firestore.enabled;
+        if (!load || !fsOn) { el.classList.remove('show'); return; }
+
+        const bad = [];
+        if (load.config && !load.config.ok)   bad.push('filters and settings');
+        if (load.identity && !load.identity.ok) bad.push('user accounts');
+        if (!bad.length) { el.classList.remove('show'); return; }
+
+        const attempts = Math.max((load.config || {}).attempts || 0,
+                                  (load.identity || {}).attempts || 0);
+        const err = (load.config || {}).lastError || (load.identity || {}).lastError || '';
+        el.innerHTML =
+            '<b>Not loaded from Firestore: ' + esc(bad.join(' and ')) + '.</b><br>'
+          + 'Your saved data is still in Firestore and is <b>not</b> being overwritten — '
+          + 'what you see below is a fallback. Retrying automatically (attempt '
+          + attempts + ').'
+          + (err ? '<br><span class="fcm-idle">' + esc(String(err).slice(0, 220)) + '</span>' : '')
+          + '<br><button class="tb-btn" onclick="reloadDurable()">↻ Retry now</button>';
+        el.classList.add('show');
+    }
+
     function renderConfigStatus() {
         const el = document.getElementById('configStatus');
         // A user is no longer sent this — the storage and push diagnostics are
