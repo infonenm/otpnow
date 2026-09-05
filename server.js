@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.32.0
+ * server.js — GetOTP Render Server v4.32.3
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -416,15 +416,19 @@ async function serveOtp(req, res, senderTokens) {
     const wait = Math.min(Math.max(parseInt(req.query.wait, 10) || 0, 0), MAX_WAIT_SECONDS);
     if (wait === 0) return res.json({ success: false, otp: '' });
 
-    // Every long-poll slot is taken. Say so instead of parking, because
+    // No long-poll slot for this caller. Say so instead of parking, because
     // waitForOtp would refuse to park and resolve INSTANTLY — and the reply
     // below would then claim `timedOut` after zero milliseconds, which a client
     // reads as "I waited 25 s and nothing came" and answers by asking again
     // immediately. That turns saturation into a tight loop against a server
     // that is already saturated. `busy` is a different fact and deserves a
     // different word: back off, do not treat it as "no OTP yet".
-    if (store.waitersFull()) {
-        console.warn('[server] Long-poll slots full — answering busy rather than parking');
+    //
+    // The NUMBER is passed so the per-number cap gets the same answer. A cap
+    // that refused to park but still reported `timedOut` would recreate the
+    // tight loop it exists to prevent, on exactly the number already causing it.
+    if (store.waitersFull(number)) {
+        console.warn('[server] No long-poll slot — answering busy rather than parking');
         return res.json({ success: false, otp: '', busy: true });
     }
 
@@ -510,8 +514,13 @@ app.post('/api/login', asyncRoute(async (req, res) => {
 // exists, so it cannot be used to enumerate accounts.
 let enrollFailures = 0;
 
-app.post('/api/set-password', asyncRoute(async (req, res) => {
-    if (!store.usersEnabled()) return res.status(404).json({ error: 'Users are not enabled' });
+// usersGate FIRST, and that order matters. With USERS_ENABLED off, loadIdentity
+// never runs and isLoaded() is false — so putting the identity guard first would
+// answer 503 "still loading" for a feature that is switched off and will never
+// load. The flag question has to be settled before the readiness one. usersGate
+// says exactly what the inline check here used to.
+app.post('/api/set-password', usersGate, requireIdentityLoadedForEnroll,
+         asyncRoute(async (req, res) => {
     const { username, code, password } = req.body || {};
     const r = await store.users.setPassword(username, code, password);
 
@@ -766,15 +775,56 @@ function usersGate(req, res, next) {
  * next restart. Silently. Accepting an edit you cannot keep is worse than
  * refusing it, because the operator walks away believing it is done.
  */
+/**
+ * @returns {boolean} true if the request was already answered and must stop.
+ *
+ * One check, two audiences. The admin can act on "press Retry now"; someone
+ * enrolling with a code cannot — they are not looking at Settings and have no
+ * way to reach it. Telling them to would send them hunting for a screen they
+ * will never find, so they get the one instruction that is true for them.
+ */
+function identityNotLoaded(res, message) {
+    if (store.users.isLoaded()) return false;
+    res.status(503).json({ error: message });
+    return true;
+}
+
+// DECLARATIONS, not const middleware. Routes are registered in file order and
+// /api/set-password sits several hundred lines ABOVE this block; a const here
+// would be in its temporal dead zone at registration time and the server would
+// refuse to start. usersGate above is a declaration for the same reason.
 function requireIdentityLoaded(req, res, next) {
-    if (!store.users.isLoaded()) {
-        return res.status(503).json({
-            error: 'User data has not loaded from Firestore yet, so changes cannot be '
-                 + 'saved and would be lost at the next restart. Your existing accounts '
-                 + 'are safe in Firestore. Open Settings > Config storage and press '
-                 + 'Retry now, or wait — it retries by itself.'
-        });
-    }
+    if (identityNotLoaded(res,
+        'User data has not loaded from Firestore yet, so changes cannot be '
+      + 'saved and would be lost at the next restart. Your existing accounts '
+      + 'are safe in Firestore. Open Settings > Config storage and press '
+      + 'Retry now, or wait — it retries by itself.')) return;
+    next();
+}
+
+/**
+ * The same guard, worded for the person enrolling.
+ *
+ * =============================================================================
+ * /api/set-password WAS THE ONE IDENTITY WRITE WITH NO GUARD.
+ *
+ * Every other mutating identity route has had this since it was added; this one
+ * was missed, and it is the route a NEW user hits. During a Firestore outage it
+ * accepted the password, cleared the one-time enrollment code in memory, and
+ * then markDirty() correctly refused to persist any of it — so the account came
+ * back after the next restart with no password and the OLD code live again,
+ * while the person had been told they were enrolled and could not sign in.
+ *
+ * Refusing up front is the whole point of the guard: an edit you cannot keep
+ * must not be accepted, and this is the edit that costs someone their account.
+ * =============================================================================
+ */
+function requireIdentityLoadedForEnroll(req, res, next) {
+    if (identityNotLoaded(res,
+        'The server cannot save your password right now because it is still loading '
+      + 'its user data. Nothing has been changed and your enrollment code still '
+      + 'works — wait a moment and try again, or tell the admin if it keeps '
+      + 'happening.')) return;
     next();
 }
 
