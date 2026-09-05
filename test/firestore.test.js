@@ -511,8 +511,49 @@ const mk = ${fakeDb.toString()};
         assert.strictEqual(r.ok, false,
             'a failed identity read must be distinguishable from an empty one');
         firestore._setDbForTests(null);
-        done();
+        return midFlightWriteTest().then(done);
     });
+}
+
+/**
+ * 17. A SAVE LANDING MID-WRITE MUST NOT BE DISCARDED.
+ *
+ * doFlushWrite cleared the pending slot unconditionally on success. A cold
+ * Firestore connection routinely takes seconds, and a second save inside that
+ * window was overwritten to null — never written — while pendingConfig flipped
+ * to false, so the dashboard reported "saved".
+ *
+ * Same class as the "Retry now erased a user" bug, through the IN-FLIGHT window
+ * instead of the debounce window.
+ *
+ * CHAINED, not written as another top-level block: the block above ends with a
+ * `return` at module scope, which exits the module — so anything after it is
+ * dead code. The first version of this test was exactly that, and passed
+ * happily against the unfixed write path because it never ran at all.
+ */
+async function midFlightWriteTest() {
+    // Required here: the surrounding blocks each require it in their own scope.
+    const firestore = require('../lib/firestore');
+    let stored = null;
+    firestore._setDbForTests({
+        collection: () => ({ doc: () => ({
+            get: async () => ({ exists: false }),
+            set: async (v) => { await new Promise(r => setTimeout(r, 300)); stored = v; }
+        })})
+    });
+
+    firestore.writeConfig({ filters: [{ phoneNumber: 'FIRST' }] }, 'save1');
+    await new Promise(r => setTimeout(r, 2100));     // debounce fires; write in flight
+    firestore.writeConfig({ filters: [{ phoneNumber: 'SECOND' }] }, 'save2');
+    await new Promise(r => setTimeout(r, 3000));
+
+    assert.ok(stored, 'something must have been written');
+    assert.strictEqual(stored.filters[0].phoneNumber, 'SECOND',
+        'the LATER save must win. Clearing the pending slot unconditionally on '
+        + 'success discards whatever arrived while the write was in flight, and '
+        + 'reports it as saved.');
+
+    firestore._setDbForTests(null);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

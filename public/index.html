@@ -885,9 +885,33 @@
 
         eventSource.addEventListener('settings_change', e => {
             const d = JSON.parse(e.data);
-            if (d.key === 'globalForwarding') { globalForwarding = d.value; updateToggleBtn(); }
+            if (d.key === 'globalForwarding') {
+                globalForwarding = d.value;
+                updateToggleBtn();
+                // A USER has no toggle — this button is the only place they see
+                // the state, and it was never refreshed here. They saw
+                // "Forwarding ON" after the admin had switched it off.
+                renderOverrideButton();
+            }
             if (d.key === 'autoDeleteMinutes') autoDeleteMinutes = d.value;
             if (d.key === 'filters') configFilters = d.value;
+            if (d.key === 'override') {
+                // Ignored entirely before, so "N min left" never counted down
+                // and never cleared at expiry until the page was reloaded.
+                if (d.value && d.value.userId === me.userId) {
+                    identity = identity || {};
+                    identity.overrides = identity.overrides || {};
+                    if (d.value.expiresAt) {
+                        identity.overrides[me.userId] = {
+                            expiresAt:   d.value.expiresAt,
+                            remainingMs: d.value.expiresAt - Date.now()
+                        };
+                    } else {
+                        delete identity.overrides[me.userId];
+                    }
+                }
+                renderOverrideButton();
+            }
         });
 
         eventSource.onopen = () => {
@@ -1348,6 +1372,7 @@
         renderConfigFilters();
         renderFcmStatus();
         renderConfigStatus();
+        renderArchiveStatus();
         refreshFcmStatus();          // re-read: the cached copy is from login time
     }
 
@@ -1372,6 +1397,7 @@
             if (s.me) me = s.me;
             renderFcmStatus();
             renderConfigStatus();
+            renderArchiveStatus();
             renderLoadBanner();
             renderOverrideButton();
             if (me.role === 'admin') fillTargetDropdown();
@@ -1858,7 +1884,8 @@
     function setUserActive(id, active) {
         if (!active && !confirm('Deactivate ' + id + '?\n\n'
             + 'They lose every dashboard control immediately, even mid-session.\n'
-            + 'Their phones keep forwarding, to admin.')) return;
+            + 'THEIR PHONES STOP FORWARDING — messages arriving on them are not '
+            + 'delivered at all until you reactivate.')) return;
         adminPost('/api/users/' + encodeURIComponent(id) + '/active', { active },
             active ? id + ' reactivated' : id + ' deactivated — their phones now file to admin');
     }

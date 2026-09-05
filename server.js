@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.30.3
+ * server.js — GetOTP Render Server v4.32.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -593,11 +593,31 @@ app.post('/api/toggle', requireAdmin, (req, res) => {
  * and the body is ignored. An admin may say "all" (the default, which is
  * exactly today's behaviour) or name one user.
  */
+/**
+ * @returns {string|null|false} user id, null for everyone, false if invalid.
+ *
+ * FALSE IS NOT null. slug() returns '' for a name with no letters or digits, and
+ * '' is falsy — so a malformed target fell straight through to the broadcast
+ * branch. Aiming at garbage widened the scope to every device, which is the
+ * opposite of what the caller asked for. Widening scope on bad input is never
+ * the safe default.
+ */
 function commandTarget(req) {
     if (req.session.role !== 'admin') return req.session.userId;
     const t = (req.body || {}).target;
-    if (!t || t === 'all') return null;
-    return store.users.slug(t);
+    if (t === undefined || t === null || t === '' || t === 'all') return null;
+
+    const id = store.users.slug(t);
+    if (!id) return false;
+    if (store.usersEnabled() && !store.users.listUsers().some(u => u.id === id)) return false;
+    return id;
+}
+
+/** Shared guard: reject an invalid target rather than broadening it. */
+function rejectBadTarget(target, res) {
+    if (target !== false) return false;
+    res.status(400).json({ error: 'Unknown target user. Use "all" or an existing user id.' });
+    return true;
 }
 
 /** Broadcast topic, or one owner's. */
@@ -605,6 +625,7 @@ function topicFor(target) { return target ? 'user_' + target : undefined; }
 
 app.post('/api/clear-log', requireToken, (req, res) => {
     const target = commandTarget(req);
+    if (rejectBadTarget(target, res)) return;
     const ts = store.triggerClearLog(Date.now(), target);
     fcm.send('clear_log', ts, topicFor(target));
     res.json({ success: true, target: target || 'all' });
@@ -613,6 +634,7 @@ app.post('/api/clear-log', requireToken, (req, res) => {
 // Send test message to devices
 app.post('/api/test', requireToken, (req, res) => {
     const target = commandTarget(req);
+    if (rejectBadTarget(target, res)) return;
     const ts = store.triggerTestMessage(Date.now(), target);
     fcm.send('test', ts, topicFor(target));
     res.json({ success: true, target: target || 'all' });
@@ -626,6 +648,7 @@ app.post('/api/test', requireToken, (req, res) => {
 // the message ever existed.
 app.post('/api/fetch-latest', requireToken, (req, res) => {
     const target = commandTarget(req);
+    if (rejectBadTarget(target, res)) return;
     const ts = store.triggerFetchLatest(Date.now(), target);
     fcm.send('fetch_latest', ts, topicFor(target));
     res.json({ success: true, fetchLatestTs: ts, target: target || 'all' });
@@ -831,7 +854,15 @@ app.post('/api/set-url', usersGate, requireAdmin, (req, res) => {
         });
     }
 
-    const who = (req.body || {}).target && target !== 'all' ? store.users.slug(target) : null;
+    // Same rule as the one-shot commands: a malformed target must not become
+    // "every phone", which here would move the entire fleet to a new server.
+    let who = null;
+    if (target !== undefined && target !== null && target !== '' && target !== 'all') {
+        who = store.users.slug(target);
+        if (!who || !store.users.listUsers().some(u => u.id === who)) {
+            return res.status(400).json({ error: 'Unknown target user. Omit it, or use "all".' });
+        }
+    }
     fcm.send('set_url', Date.now(), who ? 'user_' + who : undefined, { url: raw });
     console.warn(`[server] set_url pushed: ${raw} -> ${who || 'all devices'}`);
     res.json({
