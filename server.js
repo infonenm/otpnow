@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.32.3
+ * server.js — GetOTP Render Server v4.35.2
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -20,7 +20,7 @@
  * asserts that by counting calls. Everything an OTP touches is in memory.
  *
  * Endpoints:
- *   POST /sms             → Receive SMS from Android app (API key auth)
+ *   POST /sms             → Receive SMS from Android app (API key auth, idempotent on msgId)
  *   GET  /get?number=X    → OTP fetch API
  *   GET  /api/settings    → Settings for Android app polling (API key auth)
  *   POST /api/login       → Dashboard login (password → token)
@@ -266,7 +266,7 @@ function requireAdmin(req, res, next) {
 // ON that way — a device that is off sends nothing — which is why the alarm
 // chain and the worker still exist.)
 app.post('/sms', requireApiKey, (req, res) => {
-    const { sender, recipient, message, arrivedAt, deviceId } = req.body || {};
+    const { sender, recipient, message, arrivedAt, deviceId, msgId } = req.body || {};
     if (!sender || !message) {
         return res.status(400).json({ error: 'Missing sender or message' });
     }
@@ -275,19 +275,32 @@ app.post('/sms', requireApiKey, (req, res) => {
     // for a bounded window while the global switch is off. Same function the
     // app is answered with below, so enforcement and instruction cannot differ.
     if (!store.forwardingFor(deviceId)) {
-        console.log(`[server] Declined SMS from ${sender} — forwarding is OFF`);
+        // WHY it was declined changes what the device should do about it. A
+        // removed device must LOCK, not merely switch off — otherwise the next
+        // poll that reports globalForwarding:true would turn it straight back
+        // on, because convergence is level-triggered by design.
+        const revoked = store.users.isRevoked(deviceId);
+        console.log(`[server] Declined SMS from ${sender} — `
+            + (revoked ? `device ${deviceId} has been removed` : 'forwarding is OFF'));
         // globalRaw travels with EVERY state the app is told, not just the poll.
         // Sending only the effective value made an override look like an admin
         // toggle — see the note on globalRaw in /api/settings.
         return res.json({ success: true, ignored: true,
                           globalForwarding: false,
+                          revoked,
                           globalRaw: store.isForwardingEnabled() });
     }
 
     if (deviceId) store.users.touchDevice(deviceId);
+    // msgId is the phone's deterministic id for this SMS. Absent on an older
+    // app, which is simply not deduplicated — exactly today's behaviour.
     const result = store.addSms(sender, recipient || 'Unknown', message,
-                                arrivedAt || Date.now(), deviceId);
+                                arrivedAt || Date.now(), deviceId, msgId);
+    // `duplicate` is reported but the status stays 200 and `success` stays true,
+    // deliberately: this is a message the server already HAS, so the device must
+    // mark its row delivered and stop. Anything else would send it round again.
     res.json({ success: true, id: result.id, code: result.code || null,
+               duplicate: !!result.duplicate,
                globalForwarding: true, globalRaw: store.isForwardingEnabled() });
 });
 
@@ -343,6 +356,12 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // own override silently cleared a deliberate local opt-out on their
         // phones. Two meanings, two fields.
         globalRaw:        store.isForwardingEnabled(),
+        // The phone has been removed on the dashboard. Carried on the poll as
+        // well as on the /sms reply because a locked device stops sending, so
+        // the /sms carrier goes quiet the moment it works — this is the one
+        // that keeps telling it, and the one that tells a device that was
+        // already idle when it happened.
+        revoked:          store.users.isRevoked(req.query.deviceId),
         // Per device: the newer of the broadcast timestamp and this owner's.
         // RemoteCommands already de-duplicates by timestamp, so targeting
         // needed no app change at all.
@@ -935,7 +954,21 @@ app.post('/api/reload', requireAdmin, asyncRoute(async (req, res) => {
 }));
 
 app.get('/api/devices', usersGate, requireAdmin, (req, res) => {
-    res.json({ devices: store.users.listDevices() });
+    res.json({ devices: store.users.listDevices(),
+               // Removed phones are still worth seeing: a device that vanished
+               // from this list with no trace is indistinguishable from one
+               // that was never installed.
+               revoked: store.users.listRevoked() });
+});
+
+// Undo a removal without anyone touching the phone.
+//
+// The admin removed it, so the admin can put it back. Requiring the username
+// here too would make a mis-click cost a trip to wherever that phone is.
+app.post('/api/devices/:id/restore', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
+    const r = store.users.restoreDevice(req.params.id);
+    if (!r.ok) return res.status(404).json({ error: r.error });
+    res.json({ success: true });
 });
 
 app.post('/api/devices/:id/assign', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
@@ -948,6 +981,24 @@ app.post('/api/devices/:id/assign', usersGate, requireAdmin, requireIdentityLoad
 app.post('/api/devices/:id/rename', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const r = store.users.renameDevice(req.params.id, (req.body || {}).name);
     if (!r.ok) return res.status(404).json({ error: r.error });
+    res.json({ success: true, device: r.device });
+});
+
+// The number this phone's SIM actually is.
+//
+// THE ONE CONTROL THAT MAKES AN UNRESOLVED SIM FETCHABLE. A carrier that never
+// writes EF_MSISDN leaves the phone unable to read its own number, so the store
+// files the message under a per-device key — visible on the dashboard and
+// unreachable to GET /get?number=..., which looks precisely like the SMS never
+// arriving. The number is not anywhere in the system to be found; it is in the
+// operator's head. This is where it goes.
+//
+// Leave it blank on a dual-SIM phone where NEITHER SIM resolves: filing under
+// one of the two would route the other's OTP to the wrong number, and refusing
+// to guess is the right answer. See users.setDeviceSim.
+app.post('/api/devices/:id/sim', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
+    const r = store.users.setDeviceSim(req.params.id, (req.body || {}).simNumber);
+    if (!r.ok) return res.status(400).json({ error: r.error });
     res.json({ success: true, device: r.device });
 });
 
@@ -988,6 +1039,17 @@ app.post('/api/register', requireApiKey, (req, res) => {
     }
     const { deviceId, model, name, claimedUser } = req.body || {};
     const device = store.users.registerDevice(deviceId, { model, name, claimedUser });
+
+    // REMOVED, and not reactivated by this attempt. 200 rather than 403 on
+    // purpose: the app reads 401/403 from this server as "the API key is
+    // wrong", and reporting a revocation that way would send the operator
+    // rebuilding the APK over a button somebody pressed on the dashboard. The
+    // flag says what happened; the status code stays out of it. Same reasoning
+    // as the 200 on a declined /sms.
+    if (device && device.revoked) {
+        return res.json({ success: false, usersEnabled: true,
+                          revoked: true, needsUsername: true, error: device.error });
+    }
     if (device && device.error) return res.status(400).json({ error: device.error });
     res.json({
         success: true, usersEnabled: true,

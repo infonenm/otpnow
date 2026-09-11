@@ -239,6 +239,70 @@ const mk = ${fakeDb.toString()};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 5b. THE CEILING ONLY MOVED THE HOLE. THIS IS THE OTHER HALF.
+//
+// Test 5 releases the read inside the 3s window, which is the easy case. The
+// REAL cold start is slower than that — firestore.js raised its read timeout to
+// 20s precisely because a cold container's first call takes several seconds —
+// so the ceiling fires first and the message is read with the CATCH-ALL after
+// all. That is the same wrong-code failure, arriving five seconds later.
+//
+// A code read that way is PROVISIONAL. When the real config lands it must be
+// re-read and corrected, and anything parked on that number must be woken with
+// the corrected value.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    // NOTE THE SINGLE ESCAPE. The other cases in this file pass '(\\\\d{4,8})',
+    // which reaches the env var double-escaped and is dropped by sanitizeFilters
+    // — so they run with NO catch-all at all, which is fine for what they assert
+    // and useless here: this case needs the catch-all to actually fire.
+    const out = run({ STATE_FILE: tmpState(), OTP_PATTERNS: '(\\d{4,8})' }, PRELUDE + `
+        // Released at 3.2s — AFTER the 3s ceiling, which is the whole point.
+        let release;
+        const slow = new Promise(r => { release = r; });
+        firestore._setDbForTests({
+            collection: () => ({ doc: () => ({
+                get: async () => { await slow; return { exists: true, data: () => ({
+                    filters: [{ phoneNumber: 'DEFAULT', patterns: ['\\\\bis\\\\s+(\\\\d{4,8})\\\\b'] }],
+                    globalForwarding: true, autoDeleteMinutes: 30 }) }; },
+                set: async () => {}
+            }) })
+        });
+        const store = require(${JSON.stringify(path.join(LIB, 'store.js'))});
+        store.loadDurableConfig();
+        store.addSms('bKash', '01711111111', 'Tk 2000.00 paid. Your OTP is 445566.', Date.now());
+
+        setTimeout(() => {
+            // Ceiling has fired. Read WITHOUT consuming — getOtp would spend the
+            // code and put the message beyond correction, which is exactly the
+            // narrow window the 3s ceiling exists to keep small.
+            const sms = Array.from(store._internals.smsMap.values())[0];
+            console.log('PROVISIONAL_CODE=' + JSON.stringify(sms.extractedCode));
+            console.log('PROVISIONAL_FLAG=' + store.configStatus().provisional);
+
+            // A script parked on this number across the correction.
+            const parked = store.waitForOtp('01711111111', 3000, () => {});
+            parked.then(otp => {
+                console.log('PARKED_GOT=' + JSON.stringify(otp));
+                process.exit(0);
+            });
+            release();
+        }, 3200);
+    `);
+    assert.ok(/PROVISIONAL_CODE="2000"/.test(out.stdout),
+        'past the ceiling the catch-all does run and does grab the amount — that is '
+        + 'the situation being corrected, not a bug in the test: ' + out.stdout);
+    assert.ok(/PROVISIONAL_FLAG=true/.test(out.stdout),
+        'and the store must SAY it is running on a provisional config, so the '
+        + 'dashboard can too');
+    assert.ok(/PARKED_GOT="445566"/.test(out.stdout),
+        'when the real config lands the code must be re-read and the waiter woken '
+        + 'with the CORRECTED value — got: ' + out.stdout);
+    assert.ok(!/PARKED_GOT="2000"/.test(out.stdout),
+        'serving the amount is the failure this exists to prevent');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 6. The deferral ceiling. A read that never settles must not hold OTPs forever.
 // ─────────────────────────────────────────────────────────────────────────────
 {
