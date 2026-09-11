@@ -519,6 +519,57 @@
     .hist-danger:hover:not(:disabled){background:rgba(248,113,113,0.18)}
     .hist-danger:disabled{opacity:.4;cursor:default;color:var(--text-3);border-color:var(--border);background:var(--bg-card)}
     .hist-row.sel{border-color:var(--teal-line);background:rgba(0,212,170,0.05)}
+    /* The row truncates — the whole message is the thing you actually came to
+       read, so the row has to be a way in rather than the final answer. */
+    .hist-row{cursor:pointer;transition:border-color .12s,background .12s}
+    .hist-row:hover{border-color:var(--border-h);background:var(--bg-hover)}
+    .hist-row .hist-cb{cursor:pointer}
+
+    /* ── One message, in full ────────────────────────────────────
+       z-index ABOVE .config-overlay (900): this opens on top of the History
+       modal, which is still open behind it. Closing it must return you to the
+       list exactly where you were, so History is never dismissed. */
+    .msg-overlay{
+        display:none;position:fixed;inset:0;background:rgba(4,7,14,0.78);
+        backdrop-filter:blur(4px);z-index:1000;
+        justify-content:center;align-items:center;padding:24px;
+    }
+    .msg-overlay.open{display:flex}
+    .msg-modal{
+        width:100%;max-width:520px;max-height:82vh;overflow-y:auto;
+        background:var(--bg-panel);border:1px solid var(--border-h);
+        border-radius:var(--radius-lg);padding:22px;box-shadow:var(--shadow);
+    }
+    .msg-modal h3{
+        display:flex;align-items:center;justify-content:space-between;gap:12px;
+        font-size:15px;font-weight:700;margin-bottom:16px;letter-spacing:-0.02em;
+    }
+    .msg-meta{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:12px;margin-bottom:16px}
+    .msg-meta dt{
+        font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+        color:var(--text-3);white-space:nowrap;padding-top:2px;
+    }
+    .msg-meta dd{color:var(--text-1);word-break:break-word}
+    .msg-meta dd .mono{font-family:var(--mono);font-size:11.5px;color:var(--text-2)}
+    /* The full body, wrapped and selectable. white-space:pre-wrap keeps the
+       carrier's own line breaks — an OTP is often on its own line and losing
+       that makes a long message much harder to scan. */
+    .msg-body{
+        font-family:var(--mono);font-size:12.5px;line-height:1.7;color:var(--text-1);
+        background:var(--bg-card);border:1px solid var(--border);
+        border-radius:var(--radius-sm);padding:13px 14px;
+        white-space:pre-wrap;word-break:break-word;user-select:text;max-height:38vh;overflow-y:auto;
+    }
+    .msg-code{
+        font-family:var(--mono);font-size:20px;font-weight:700;color:var(--teal);
+        background:var(--teal-dim);border:1px dashed var(--teal-line);
+        border-radius:var(--radius-sm);padding:9px 14px;margin-bottom:14px;
+        text-align:center;letter-spacing:.12em;cursor:pointer;user-select:all;
+    }
+    .msg-code:hover{background:rgba(0,212,170,0.18)}
+    .msg-code.none{color:var(--text-3);background:rgba(255,255,255,0.03);
+        border-color:var(--border);font-size:13px;letter-spacing:0;cursor:default;font-weight:600}
+    .msg-actions{display:flex;gap:8px;margin-top:14px}
     .hist-row .msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
 
     /* ── Toast ──────────────────────────────────────────────── */
@@ -806,6 +857,25 @@
                     <input id="histOlderThan" type="number" min="1" value="30" style="max-width:110px">
                     <button onclick="deleteHistoryOlder()">Delete older than N days</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ONE MESSAGE, IN FULL.
+         The history row truncates, and the body is exactly what you opened
+         History to read. Sits ABOVE the History modal rather than replacing it,
+         so closing this returns you to the list where you left it. -->
+    <div id="msgOverlay" class="msg-overlay">
+        <div class="msg-modal">
+            <h3><span id="msgTitle">Message</span>
+                <button class="config-close" onclick="closeMessage()">✕</button></h3>
+            <div id="msgCode" class="msg-code none">—</div>
+            <dl id="msgMeta" class="msg-meta"></dl>
+            <div id="msgBody" class="msg-body"></div>
+            <div class="msg-actions">
+                <button class="a-btn" onclick="copyMessageBody()">Copy message</button>
+                <span style="flex:1"></span>
+                <button class="a-btn" onclick="closeMessage()">Close</button>
             </div>
         </div>
     </div>
@@ -1253,6 +1323,12 @@
         if (e.key !== 'Escape') return;
         const menu = document.getElementById('barMenu');
         if (menu.classList.contains('open')) { closeMenu(); return; }
+        // FIRST in the chain, because it is the topmost thing on screen. Without
+        // this, Escape over an open message would close History underneath it
+        // and leave the message floating over nothing.
+        if (document.getElementById('msgOverlay').classList.contains('open')) {
+            closeMessage(); return;
+        }
         for (const [id, fn] of [['historyOverlay', closeHistory],
                                 ['adminOverlay', closeAdmin],
                                 ['configOverlay', closeConfig]]) {
@@ -2368,6 +2444,106 @@
         }).join('');
         updateHistSelectionUI();
     }
+
+    // ── One message, in full ─────────────────────────────────────
+    //
+    // The row shows a truncated line because 200 of them have to fit on a
+    // screen. The BODY is what you opened History to read — which OTP, what the
+    // sender actually said, whether it was the message you were waiting for —
+    // and it was the one thing you could not get to.
+
+    function openMessage(smsId) {
+        const r = historyRows.find(x => String(x.smsId) === String(smsId));
+        if (!r) return;
+
+        document.getElementById('msgTitle').textContent = r.sender || 'Message';
+
+        // The code, big and one click to copy. It is the reason the message
+        // exists, so it does not belong in a row of small grey metadata.
+        const code = document.getElementById('msgCode');
+        if (r.code) {
+            code.textContent = r.code;
+            code.className = 'msg-code';
+            code.title = 'Click to copy';
+        } else {
+            code.textContent = 'No code was extracted from this message';
+            code.className = 'msg-code none';
+            code.title = '';
+        }
+
+        const fmt = t => t ? new Date(t).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' }) : '—';
+        // WHAT THE OUTCOME MEANS, not just its name. "superseded" is the one
+        // people misread as an error — it means a newer SMS for that number
+        // arrived and replaced this code, which is the system working.
+        const why = {
+            fetched:    'a script fetched this code — it was used',
+            superseded: 'a newer SMS for this number replaced it before anyone fetched it',
+            expired:    'a code was extracted but nobody ever fetched it',
+            no_code:    'no filter matched, so no code could be read from it',
+            cleared:    'deleted from the dashboard before it was fetched'
+        }[r.outcome] || '';
+
+        const rows = [
+            ['From',      esc(r.sender)],
+            ['To',        esc(r.recipient)],
+            ['Phone',     esc(r.deviceLabel || r.deviceId || '—')],
+            ['User',      esc(r.userId || '—')],
+            ['Outcome',   `${esc(r.outcome)}${why ? ' — <span class="mono">' + esc(why) + '</span>' : ''}`],
+            ['Received',  '<span class="mono">' + esc(fmt(r.receivedAt)) + '</span>'],
+            ['Finished',  '<span class="mono">' + esc(fmt(r.finishedAt)) + '</span>']
+        ];
+        // Only when the two clocks actually disagree. A "delivered late" line on
+        // every message would be noise; on the one message that WAS late it is
+        // the difference between "the SMS never came" and "the push was slow".
+        const lag = Math.round(((r.receivedAt || 0) - (r.arrivedAt || 0)) / 1000);
+        if (lag >= 60) {
+            rows.push(['Delay', `<span class="mono">reached the server ${
+                Math.floor(lag / 60)}m after it arrived on the phone</span>`]);
+        }
+        document.getElementById('msgMeta').innerHTML =
+            rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('');
+
+        // textContent, not innerHTML. The body is attacker-controlled text and
+        // the one place in this dashboard where the FULL, unmodified message is
+        // rendered — esc() would work, but assigning text cannot be got wrong.
+        document.getElementById('msgBody').textContent = r.message || '(empty message)';
+
+        document.getElementById('msgOverlay').classList.add('open');
+    }
+
+    function closeMessage() {
+        document.getElementById('msgOverlay').classList.remove('open');
+    }
+
+    function copyMessageBody() {
+        const t = document.getElementById('msgBody').textContent;
+        navigator.clipboard.writeText(t)
+            .then(() => notify('Message copied'))
+            .catch(() => notify('Could not copy'));
+    }
+
+    // Row click opens it. The CHECKBOX is excluded — that is the delete
+    // selection, and having one click do both would mean opening a message
+    // silently arms it for deletion.
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.hist-cb')) return;
+        const row = e.target.closest('.hist-row');
+        if (!row) return;
+        openMessage(row.getAttribute('data-hid'));
+    });
+
+    // Click the code to copy it.
+    document.getElementById('msgCode').addEventListener('click', function () {
+        if (this.classList.contains('none')) return;
+        navigator.clipboard.writeText(this.textContent)
+            .then(() => notify('Code copied'))
+            .catch(() => notify('Could not copy'));
+    });
+
+    // Backdrop click closes; a click INSIDE the card must not.
+    document.getElementById('msgOverlay').addEventListener('click', (e) => {
+        if (e.target.id === 'msgOverlay') closeMessage();
+    });
 
     // ── Selecting individual messages ────────────────────────────
     //
