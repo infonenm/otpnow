@@ -734,10 +734,10 @@
             </div>
             <div class="section">
                 <div class="section-header">
-                    <div class="section-title">Used <span class="count-badge" id="usedCount">0</span></div>
+                    <div class="section-title">Finished <span class="count-badge" id="usedCount">0</span></div>
                 </div>
                 <div class="sms-list" id="usedList">
-                    <div class="empty-state"><div class="empty-state-icon">📪</div><div>No used messages</div></div>
+                    <div class="empty-state"><div class="empty-state-icon">📪</div><div>No finished messages</div></div>
                 </div>
             </div>
         </div>
@@ -791,18 +791,13 @@
                 <div class="config-add"><input id="newUserName" placeholder="Name, e.g. Rahim"><button onclick="createUser()">+ Create</button></div>
             </div>
             <div class="config-section">
-                <h4>Devices <span class="a-count" id="devicesCount">0</span></h4>
+                <h4>Devices <span class="a-count" id="devicesCount">0</span>
+                    <label id="inactiveToggleWrap" style="float:right;font-size:11.5px;font-weight:400;color:var(--text-3);cursor:pointer;display:none">
+                        <input type="checkbox" id="showInactive" style="vertical-align:middle"> Show inactive (<span id="inactiveCount">0</span>)</label></h4>
                 <div id="devicesList"></div>
                 <div class="a-note">A phone that cannot read its own SIM number files its
                     messages under a device key, where <span class="mono">GET /get</span>
                     cannot reach them. Set the SIM number on any card flagged amber.</div>
-            </div>
-            <div class="config-section">
-                <h4>Removed devices <span class="a-count" id="revokedCount">0</span></h4>
-                <div id="revokedList"></div>
-                <div class="a-note">A removed phone stops forwarding at once and cannot
-                    re-register on its own. Whoever holds it must enter their username in
-                    the app, or you can allow it back here.</div>
             </div>
             <div class="config-section"><h4>Allowed server hosts</h4>
                 <div id="hostsList"></div>
@@ -841,6 +836,7 @@
                         <option value="expired">never fetched</option>
                         <option value="superseded">superseded</option>
                         <option value="no_code">no code extracted</option>
+                        <option value="cleared">cleared</option>
                     </select>
                     <input id="histSearch" placeholder="sender or number" oninput="renderHistory()">
                 </div>
@@ -892,6 +888,10 @@
     let eventSource = null;
     let configFilters = [];
     let autoDeleteMinutes = 30;
+    // How long a code is fetchable — the server's OTP_MAX_AGE_SECONDS. This, not
+    // the auto-delete time, is what "pending" counts down: a pending card used to
+    // say "28m remaining" about a code /get had stopped serving 26 minutes ago.
+    let otpMaxAgeMs = 120000;
     let fcmStatus = null;
     let configStatus = null;
     let me = { userId: 'admin', role: 'admin' };
@@ -1022,6 +1022,7 @@
                 globalForwarding = s.globalForwarding;
                 configFilters = s.filters || [];
                 autoDeleteMinutes = s.autoDeleteMinutes || 30;
+                if (s.otpMaxAgeSeconds > 0) otpMaxAgeMs = s.otpMaxAgeSeconds * 1000;
                 fcmStatus = s.fcm || null;
                 configStatus = s.config || null;
                 identity = s.identity || null;
@@ -1077,7 +1078,7 @@
             const d = JSON.parse(e.data);
             const card = document.querySelector(`[data-id="${d.id}"]`);
             if (card) { card.classList.add('expiring'); setTimeout(() => { delete allMessages[d.id]; scheduleRender(); }, 600); }
-            else { delete allMessages[d.id]; renderAll(); }
+            else { delete allMessages[d.id]; scheduleRender(); }
         });
 
         eventSource.addEventListener('clear_all', () => { allMessages = {}; renderAll(); notify('🗑️ All messages cleared'); });
@@ -1365,7 +1366,10 @@
             numbers.add(sms.recipient);
             if (filterVal && sms.recipient !== filterVal) continue;
             if (searchVal && !sms.recipient.toLowerCase().includes(searchVal) && !sms.sender.toLowerCase().includes(searchVal)) continue;
-            (sms.status === 'used' ? used : pending).push(sms);
+            // Only a message still inside its OTP window is pending. Superseded,
+            // expired and no-code messages are FINISHED — they used to sit in
+            // this list looking fetchable.
+            (sms.status === 'pending' ? pending : used).push(sms);
         }
 
         // receivedAt (server clock) — arrivedAt is the device's clock and can be
@@ -1388,17 +1392,9 @@
         }
         container.innerHTML = items.map(sms => {
             const time = new Date(sms.arrivedAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
-            const usedClass = sms.status === 'used' ? ' used' : '';
+            const usedClass = sms.status !== 'pending' ? ' used' : '';
             const code = sms.extractedCode || sms.code || '';
-            const remaining = Math.max(0, (sms.deleteAt - Date.now()) / 1000);
-            // deleteAt is derived from receivedAt, so the bar must be too — using
-            // arrivedAt made the total wrong (and the bar wider than 100%) for any
-            // message that reached the server late.
-            const total = (sms.deleteAt - sms.receivedAt) / 1000;
-            const pct = total > 0 ? Math.max(0, Math.min(100, (remaining / total) * 100)) : 0;
-            const mins = Math.floor(remaining / 60), secs = Math.floor(remaining % 60);
-            const urgentClass = remaining < 60 ? ' urgent' : '';
-            const barColor = remaining < 60 ? 'var(--red)' : remaining < 180 ? 'var(--amber)' : 'var(--teal)';
+            const w = otpWindow(sms);
 
             // A gap between the two clocks that large is not skew, it is the
             // app's retry queue. Worth seeing: it is the difference between
@@ -1412,8 +1408,8 @@
                 <div class="sms-sender">${esc(sms.sender)} → ${esc(sms.recipient)}${recipientNote(sms)}</div>
                 <div class="sms-message">${esc(sms.message)}</div>
                 ${code ? `<div class="sms-code${usedClass}" data-code="${esc(code)}" title="Click to copy" style="cursor:pointer">${esc(code)} <span style="font-size:11px;opacity:0.6">📋</span></div>` : ''}
-                <div class="sms-time">${time}${lag}<span class="sms-status${usedClass}">${sms.status === 'used' ? ' • Used' : ' • Pending'}</span></div>
-                ${sms.status !== 'used' ? `<div class="expiry-bar-wrap"><div class="expiry-bar" style="width:${pct}%;background:${barColor}"></div></div><div class="expiry-countdown${urgentClass}">${mins}m ${secs}s remaining</div>` : ''}
+                <div class="sms-time">${time}${lag}<span class="sms-status${usedClass}"> • ${esc(statusLabel(sms))}</span></div>
+                ${sms.status === 'pending' ? `<div class="expiry-bar-wrap"><div class="expiry-bar" style="width:${w.pct}%;background:${w.color}"></div></div><div class="expiry-countdown${w.urgent ? ' urgent' : ''}">${esc(w.text)}</div>` : ''}
             </div>`;
         }).join('');
     }
@@ -1452,6 +1448,40 @@
         select.innerHTML = options.join('');
     }
 
+    /** What a card's status means, in words. */
+    function statusLabel(sms) {
+        switch (sms.status) {
+            case 'used':       return 'Fetched';
+            case 'superseded': return sms.test ? 'Test — not used, a real code was live'
+                                               : 'Superseded — not the live code';
+            case 'expired':    return 'Expired — never fetched';
+            case 'no_code':    return 'No code extracted';
+            case 'pending':
+                if (sms.test) return 'Test';
+                if (sms.stale) return 'Late replay';
+                return (sms.extractedCode || sms.code) ? 'Live' : 'Waiting — no code';
+            default:           return sms.status || '';
+        }
+    }
+
+    /**
+     * The OTP window of a pending message: how long its code stays fetchable.
+     * Measured from receivedAt (server clock), exactly as the server measures it.
+     */
+    function otpWindow(sms) {
+        const remaining = Math.max(0, (sms.receivedAt + otpMaxAgeMs - Date.now()) / 1000);
+        const total = otpMaxAgeMs / 1000;
+        const pct = total > 0 ? Math.max(0, Math.min(100, (remaining / total) * 100)) : 0;
+        const mins = Math.floor(remaining / 60), secs = Math.floor(remaining % 60);
+        const hasCode = !!(sms.extractedCode || sms.code);
+        return {
+            pct,
+            urgent: remaining < 30,
+            color: remaining < 30 ? 'var(--red)' : remaining < 60 ? 'var(--amber)' : 'var(--teal)',
+            text: (hasCode ? 'fetchable for ' : 'window closes in ') + `${mins}m ${secs}s`
+        };
+    }
+
     function startExpiryTimer() {
         if (expiryTimer) clearInterval(expiryTimer);
         expiryTimer = setInterval(() => {
@@ -1460,17 +1490,14 @@
                 if (!card) return;
                 const id = card.getAttribute('data-id');
                 const sms = allMessages[id];
-                if (!sms || sms.status === 'used') return;
-                const remaining = Math.max(0, (sms.deleteAt - Date.now()) / 1000);
-                const mins = Math.floor(remaining / 60), secs = Math.floor(remaining % 60);
-                el.textContent = `${mins}m ${secs}s remaining`;
-                el.className = 'expiry-countdown' + (remaining < 60 ? ' urgent' : '');
+                if (!sms || sms.status !== 'pending') return;
+                const w = otpWindow(sms);
+                el.textContent = w.text;
+                el.className = 'expiry-countdown' + (w.urgent ? ' urgent' : '');
                 const bar = card.querySelector('.expiry-bar');
                 if (bar) {
-                    const total = (sms.deleteAt - sms.receivedAt) / 1000;
-                    const pct = total > 0 ? Math.max(0, (remaining / total) * 100) : 0;
-                    bar.style.width = pct + '%';
-                    bar.style.background = remaining < 60 ? 'var(--red)' : remaining < 180 ? 'var(--amber)' : 'var(--teal)';
+                    bar.style.width = w.pct + '%';
+                    bar.style.background = w.color;
                 }
             });
         }, 1000);
@@ -1535,7 +1562,12 @@
         btn.disabled = true;
         const res = await authFetch('/api/clear-log', { method: 'POST', headers: authHeaders(),
             body: JSON.stringify({ target: commandTargetValue() }) });
-        if (res) notify('📋 Clear log sent to devices');
+        if (res) {
+            notify('📋 Clear log sent to devices');
+            // Watch the device list for the phones' reports for a while, so the
+            // per-device "log cleared" lines update by themselves if it is open.
+            watchDevicesFor(10 * 60_000);
+        }
         setTimeout(() => btn.disabled = false, 3000);
     }
 
@@ -1993,8 +2025,8 @@
             const dev = await d.json();
             const hosts = (await h.json()).hosts || [];
             renderUsers(users);
+            window._deviceLimits = { hide: dev.hideAfterDays || 7, del: dev.deleteAfterDays || 15 };
             renderDevices(dev.devices || [], users);
-            renderRevoked(dev.revoked || []);
             renderHosts(hosts);
         } catch (e) { adminNotice('Could not reach the server', true); }
     }
@@ -2058,65 +2090,39 @@
                 `<div class="code-box">${esc(u.name)} — enrollment code: ${esc(u.enrollCode)}</div>`).join('');
     }
 
-    /**
-     * Phones the admin removed.
-     *
-     * Shown, rather than simply vanishing. A device that disappears without a
-     * trace is indistinguishable from one that was never installed — and since
-     * removal is now a standing block that the phone cannot lift on its own,
-     * "where did it go" has to be answerable from here.
-     */
-    function renderRevoked(list) {
-        const el = document.getElementById('revokedList');
-        if (!el) return;
-        setCount('revokedCount', (list || []).length);
-        if (!list || !list.length) {
-            el.innerHTML = '<div class="a-empty"><span class="big">\u{2713}</span>'
-                + 'Nothing removed. Every registered phone is allowed to forward.</div>';
-            return;
-        }
-        el.innerHTML = list.map(r => {
-            const label = r.name || r.model || 'Device';
-            return `
-            <div class="a-card is-off">
-                <div class="a-head">
-                    <div class="a-avatar">${esc(initial(label))}</div>
-                    <div class="a-ident">
-                        <div class="a-name">${esc(label)}</div>
-                        <div class="a-sub">${esc(String(r.id).slice(0, 12))}${
-                            r.model ? ' \u00b7 ' + esc(r.model) : ''}</div>
-                    </div>
-                    <div class="a-tags">
-                        ${r.userId ? `<span class="pill pill-idle">${esc(r.userId)}</span>` : ''}
-                        <span class="pill pill-off">removed ${esc(sinceWhen(r.at))}</span>
-                    </div>
-                </div>
-                <div class="a-foot">
-                    <span class="spacer"></span>
-                    <button class="a-btn good" data-act="restoreDevice" data-id="${esc(r.id)}">Allow back</button>
-                </div>
-            </div>`;
-        }).join('');
-    }
-
+    /** "3 days ago" for a stored timestamp (an inactive device's last contact). */
     function sinceWhen(at) {
         if (!at) return '';
         const sec = Math.max(0, Math.round((Date.now() - at) / 1000));
         return seenAgo(sec);
     }
 
-    function renderDevices(devices, users) {
+    function renderDevices(allDevices, users) {
         const el = document.getElementById('devicesList');
+        // Devices silent for more than a week are hidden unless asked for, and
+        // the server deletes them after the second limit (4.39.0).
+        const inactive = allDevices.filter(d => d.inactive);
+        const showAll = !!(document.getElementById('showInactive') || {}).checked;
+        const devices = showAll ? allDevices : allDevices.filter(d => !d.inactive);
+        document.getElementById('inactiveCount').textContent = inactive.length;
+        document.getElementById('inactiveToggleWrap').style.display = inactive.length ? '' : 'none';
         setCount('devicesCount', devices.length);
         if (!devices.length) {
             el.innerHTML = '<div class="a-empty"><span class="big">\u{1F4F1}</span>'
-                + 'No devices have registered yet. Install the current app on a phone '
-                + 'and it will appear here by itself.</div>';
+                + (inactive.length
+                    ? 'No device has checked in during the last week. Turn on "Show inactive" to see the others.'
+                    : 'No devices have registered yet. Install the current app on a phone '
+                      + 'and it will appear here by itself.') + '</div>';
             return;
         }
         const opts = ['<option value="">\u2014 unassigned \u2014</option>',
                       '<option value="admin">admin</option>']
             .concat(users.map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`)).join('');
+        // Push targets are real, ACTIVE accounts only — admin is not one, and a
+        // deactivated account would be refused by the server anyway.
+        const pushOpts = ['<option value="">\u2014 choose user \u2014</option>']
+            .concat(users.filter(u => u.active)
+                         .map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`)).join('');
         const now = Date.now();
         el.innerHTML = devices.map(d => {
             const age = d.lastSeen ? Math.round((now - d.lastSeen) / 1000) : null;
@@ -2145,8 +2151,9 @@
                             d.model ? ' \u00b7 ' + esc(d.model) : ''}</div>
                     </div>
                     <div class="a-tags">
-                        <span class="pill ${live ? 'pill-ok' : 'pill-idle'}">${
-                            age === null ? 'never seen' : live ? 'online' : seenAgo(age)}</span>
+                        <span class="pill ${live ? 'pill-ok' : (d.inactive ? 'pill-warn' : 'pill-idle')}">${
+                            age === null ? (d.lastActive ? sinceWhen(d.lastActive) : 'never seen')
+                                         : live ? 'online' : seenAgo(age)}</span>
                         ${simSet ? `<span class="pill pill-idle">${esc(d.simNumber)}</span>`
                                  : '<span class="pill pill-warn">no SIM number</span>'}
                     </div>
@@ -2163,8 +2170,83 @@
                     <span class="spacer"></span>
                     <button class="a-btn danger" data-act="removeDevice" data-id="${esc(d.id)}">Remove</button>
                 </div>
+                <div class="a-foot">
+                    <div class="a-field"><label>Phone username</label>
+                        <select class="a-select" data-push-select="${esc(d.id)}">${
+                            pushOpts.replace(`value="${esc(d.userId || '')}"`,
+                                             `value="${esc(d.userId || '')}" selected`)}</select></div>
+                    <button class="a-btn good" data-act="pushUsername" data-id="${esc(d.id)}"
+                            title="Sets this user as the owner AND writes the name into the app's Settings on this phone">Push</button>
+                    <span class="spacer"></span>
+                </div>
+                ${d.inactive ? inactiveLine(d, now) : ''}
+                ${d.sharedId ? `<div class="a-note" style="color:var(--amber)">Two phones are `
+                    + `reporting this same device id (a cloned system image). They share this `
+                    + `card, and removing one is undone by the other.</div>` : ''}
+                ${deviceStatusLines(d, now)}
             </div>`;
         }).join('');
+        // While a push is unconfirmed, keep this list fresh so "saved on phone"
+        // appears by itself — the phone confirms within one poll.
+        if (devices.some(d => d.pendingUsername)) watchDevicesFor(10 * 60_000);
+    }
+
+    /** The note on a hidden (inactive) device: when it will be deleted. */
+    function inactiveLine(d, now) {
+        const lim = window._deviceLimits || { hide: 7, del: 15 };
+        const last = d.lastActive || d.createdAt || now;
+        const left = Math.max(0, Math.ceil((last + lim.del * 86400000 - now) / 86400000));
+        return `<div class="a-note" style="color:var(--amber)">No contact for `
+            + `${Math.floor((now - last) / 86400000)} days \u2014 deleted automatically in ${left} `
+            + `day${left === 1 ? '' : 's'} unless it checks in. If it comes back after that, it `
+            + `appears as a new, unassigned device.</div>`;
+    }
+
+    /**
+     * "21:06" today, "15 Oct 21:06" on any other day, Dhaka time. A bare time
+     * on a status from three days ago read as this afternoon.
+     */
+    function hhmm(ts) {
+        const tz = { timeZone: 'Asia/Dhaka' };
+        const day = d => new Date(d).toLocaleDateString('en-GB', tz);
+        const time = new Date(ts).toLocaleTimeString('en-GB',
+            Object.assign({ hour: '2-digit', minute: '2-digit' }, tz));
+        if (day(ts) === day(Date.now())) return time;
+        return new Date(ts).toLocaleDateString('en-GB',
+            Object.assign({ day: 'numeric', month: 'short' }, tz)) + ' ' + time;
+    }
+
+    /**
+     * The two things a device card has to answer that the phone itself reports:
+     * did the pushed username reach the app, and has it done the last Clear Log.
+     * Both come from the phone (its registration, its poll), not from "sent".
+     */
+    function deviceStatusLines(d, now) {
+        const lines = [];
+        if (d.pendingUsername) {
+            const ageMin = (now - d.pendingUsername.ts) / 60000;
+            lines.push(ageMin < 5
+                ? `<span style="color:var(--text-2)">Username "${esc(d.pendingUsername.name)}" sent ${hhmm(d.pendingUsername.ts)} — waiting for the phone</span>`
+                : `<span style="color:var(--amber)">Username "${esc(d.pendingUsername.name)}" sent ${hhmm(d.pendingUsername.ts)} — no answer yet. `
+                  + `The phone is offline or closed, or its app is older than 4.33.0.</span>`);
+        } else if (d.usernameAck) {
+            lines.push(`<span style="color:var(--teal)">✓ Username "${esc(d.usernameAck.name)}" saved on the phone ${hhmm(d.usernameAck.at)}</span>`);
+        }
+        if (d.clearTarget > 0) {
+            if ((d.clearedTs || 0) >= d.clearTarget) {
+                lines.push(`<span style="color:var(--teal)">✓ Log cleared (Clear Log of ${hhmm(d.clearTarget)})</span>`);
+            } else if (!d.clearReported) {
+                // Never reported: an app older than 4.33.0 cannot, and nothing is
+                // known after a server restart until the phone's next poll. Saying
+                // "not done" here would be a guess presented as a fact.
+                lines.push(`<span style="color:var(--text-3)">Clear Log status unknown — this phone has not `
+                    + `reported (app older than 4.33.0, or not checked in since the server restarted)</span>`);
+            } else {
+                lines.push(`<span style="color:var(--amber)">Clear Log of ${hhmm(d.clearTarget)} not done yet — `
+                    + `it runs the next time this phone checks in</span>`);
+            }
+        }
+        return lines.length ? `<div class="a-note">${lines.join('<br>')}</div>` : '';
     }
 
     function seenAgo(sec) {
@@ -2272,20 +2354,59 @@
             number.trim() ? 'SIM number saved' : 'SIM number cleared');
     }
 
+    /**
+     * Push a username to one phone. The server also makes that user its owner
+     * — one action, by design — so the Owner dropdown above updates with it.
+     */
+    function pushUsername(id) {
+        const sel = document.querySelector(`[data-push-select="${CSS.escape(id)}"]`);
+        const userId = sel ? sel.value : '';
+        if (!userId) { adminNotice('Choose a user to push to this phone first', true); return; }
+        // The pick has been used; the list may refresh again.
+        window._pushPicked = false;
+        adminPost('/api/devices/' + encodeURIComponent(id) + '/push-username', { userId },
+            'Username sent \u2014 waiting for the phone to confirm');
+    }
+
+    /**
+     * Keep the device list fresh for a while — after a push or a Clear Log —
+     * so the phones' confirmations appear by themselves.
+     *
+     * Bounded, and polite:
+     *   - it STOPS at the deadline, so a phone that never answers (an older app,
+     *     or one that is off) does not keep the list redrawing forever;
+     *   - it SKIPS a tick while you are working in the list — a focused field,
+     *     or a username picked but not yet pushed — because a redraw resets every
+     *     control in it, and pushing straight after would send the OLD owner.
+     */
+    function watchDevicesFor(ms) {
+        window._watchDevicesUntil = Math.max(window._watchDevicesUntil || 0, Date.now() + ms);
+    }
+    document.addEventListener('change', (e) => {
+        if (e.target.closest('[data-push-select]')) window._pushPicked = true;
+        if (e.target.id === 'showInactive') loadAdmin();
+    });
+    setInterval(() => {
+        if (!(Date.now() < (window._watchDevicesUntil || 0))) return;
+        const list = document.getElementById('devicesList');
+        if (!list || list.offsetParent === null) return;
+        if (list.contains(document.activeElement) || window._pushPicked) return;
+        loadAdmin();
+    }, 10000);
+
     function removeDevice(id) {
         // The wording used to say it would "re-register the next time the app
         // starts" — which was true, and meant the button did nothing. It is a
         // standing block now, and the confirm has to say what it actually does.
-        if (!confirm('Remove this device?\n\nIt stops forwarding immediately and CANNOT '
-            + 'come back on its own. Whoever holds the phone must open the app and enter '
-            + 'their username to reactivate it — or you can allow it back from the '
-            + 'Removed devices list.')) return;
+        // Removed means gone (4.39.0, Riad's rule): no username way back, no
+        // "Allow back". Only reinstalling the app brings the phone back, and then
+        // as a NEW, unassigned device. The confirm says exactly that, because a
+        // mis-click now costs a reinstall on the phone.
+        if (!confirm('Remove this device?\n\nIt stops forwarding immediately and disappears '
+            + 'from this list. It comes back ONLY if the app is reinstalled on that phone — '
+            + 'and then as a new, unassigned device (owner, SIM number and username are not '
+            + 'kept).\n\nThere is no undo here.')) return;
         adminPost('/api/devices/' + encodeURIComponent(id) + '/remove', {}, 'Device removed');
-    }
-
-    function restoreDevice(id) {
-        adminPost('/api/devices/' + encodeURIComponent(id) + '/restore', {},
-            'Device allowed back — it will reappear when the app next registers');
     }
 
     function addHost() {
@@ -2325,7 +2446,7 @@
             case 'reissue':      reissue(id);              break;
             case 'purge':        purgeUser(id);            break;
             case 'removeDevice': removeDevice(id);         break;
-            case 'restoreDevice': restoreDevice(id);       break;
+            case 'pushUsername': pushUsername(id);         break;
             case 'removeHost':   removeHost(parseInt(id, 10)); break;
         }
     });
@@ -2409,9 +2530,11 @@
           + `<span class="fcm-ok">${t.fetched || 0}</span> fetched · `
           + `<span class="fcm-bad">${t.expired || 0}</span> never fetched · `
           + `<span class="fcm-idle">${t.superseded || 0}</span> superseded · `
-          + `<span class="fcm-bad">${t.no_code || 0}</span> no code extracted`
+          + `<span class="fcm-bad">${t.no_code || 0}</span> no code extracted · `
+          + `<span class="fcm-idle">${t.cleared || 0}</span> cleared`
           + (sum.fetchRate === null ? '' :
-             `<br><span class="fcm-idle">fetch rate ${sum.fetchRate}% — this is the number to watch</span>`)
+             `<br><span class="fcm-idle">fetch rate ${sum.fetchRate}% of codes that finished on their own `
+             + `(fetched, expired or superseded) — this is the number to watch</span>`)
             + (sum.truncated
                 ? `<br><span class="fcm-bad">showing the most recent ${sum.limit} only — `
                   + `these totals are a sample, not the whole month</span>` : '');

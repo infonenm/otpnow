@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.36.0
+ * server.js — GetOTP Render Server v4.39.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -171,11 +171,24 @@ app.use((req, res, next) => {
 
 // ─── Auth middleware ────────────────────────────────────────────
 
+/**
+ * Constant-time comparison of two secrets of any length.
+ *
+ * requireApiKey used a plain !== while every other secret here (the dashboard
+ * password, GET_KEY) was compared in constant time. Hashing first gives both
+ * sides a fixed length, so differing lengths neither throw nor short-circuit.
+ */
+function secretEquals(given, expected) {
+    const a = crypto.createHash('sha256').update(String(given)).digest();
+    const b = crypto.createHash('sha256').update(String(expected)).digest();
+    return crypto.timingSafeEqual(a, b);
+}
+
 function requireApiKey(req, res, next) {
     const key = req.headers['x-api-key'] || '';
     const expected = process.env.API_KEY || '';
     if (!expected) return next();   // dev mode: no key configured
-    if (key !== expected) return res.status(401).json({ error: 'Unauthorized' });
+    if (!secretEquals(key, expected)) return res.status(401).json({ error: 'Unauthorized' });
     next();
 }
 
@@ -266,10 +279,22 @@ function requireAdmin(req, res, next) {
 // ON that way — a device that is off sends nothing — which is why the alarm
 // chain and the worker still exist.)
 app.post('/sms', requireApiKey, (req, res) => {
-    const { sender, recipient, message, arrivedAt, deviceId, msgId } = req.body || {};
+    // Shutting down: refuse rather than accept. A 200 here would make the phone
+    // mark the message delivered, and this process is about to exit with it in
+    // memory. 503 is classified RETRY by the app, so the queue re-sends it to
+    // the new instance — the same thing that happened before shutdown was
+    // graceful, when the process simply died and the push failed.
+    if (shuttingDown) {
+        res.setHeader('Retry-After', '5');
+        return res.status(503).json({ error: 'Server restarting — retry' });
+    }
+    const { sender, recipient, message, arrivedAt, deviceId, msgId, installId } = req.body || {};
     if (!sender || !message) {
         return res.status(400).json({ error: 'Missing sender or message' });
     }
+    // Before the forwarding decision: a REINSTALLED removed phone is no longer
+    // removed, and its first SMS must not be declined as if it were.
+    if (deviceId) store.users.noteInstall(deviceId, installId);
 
     // PER DEVICE, not global: a user may have turned their own phones back on
     // for a bounded window while the global switch is off. Same function the
@@ -345,8 +370,15 @@ app.get('/api/settings', requireApiKey, (req, res) => {
     const s = store.getSettings();
     // Presence, from the poll the app already makes. No new mechanism, no new
     // request — this is what answers "which phones are alive?" on the dashboard.
-    if (req.query.deviceId) store.users.touchDevice(req.query.deviceId);
+    if (req.query.deviceId) {
+        store.users.noteInstall(req.query.deviceId, req.query.installId);
+        store.users.touchDevice(req.query.deviceId);
+        // Which dashboard Clear Log this phone has actually carried out — the
+        // dashboard shows "log cleared" / "pending" per device from this.
+        if (req.query.clearedTs) store.users.noteCleared(req.query.deviceId, req.query.clearedTs);
+    }
     const cmds = store.commandsFor(req.query.deviceId);
+    const pushName = store.usersEnabled() ? store.users.pendingUsernameFor(req.query.deviceId) : null;
     res.json({
         // The EFFECTIVE answer for this device — what it should DO.
         globalForwarding: store.forwardingFor(req.query.deviceId),
@@ -371,6 +403,16 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // no Play Services, so a command that only rode FCM would silently not
         // work on exactly the devices most likely to have missed the SMS.
         fetchLatestTs:    cmds.fetchLatestTs,
+        // The server's clock, so the app can tell how OLD each one-shot above
+        // is without trusting its own clock. FCM drops a one-shot after two
+        // minutes; the poll carrier had no such limit, so a phone that had been
+        // offline for twenty minutes ran a twenty-minute-old Test or Get Latest
+        // the moment it reconnected. The app applies the same two minutes.
+        serverTime:       Date.now(),
+        // A username the admin pushed to THIS phone, until the phone confirms it
+        // by registering with it. The poll is the carrier that survives a phone
+        // without Play Services; FCM (device_<id> topic) is the fast one.
+        ...(pushName ? { pushUsername: pushName } : {}),
         // OMITTED when unconfigured, rather than sent as [].
         //
         // The app treats an empty list as "not configured" and allows any host —
@@ -417,7 +459,7 @@ app.get('/api/settings', requireApiKey, (req, res) => {
 // only answer with an OTP from its own gateway.
 //
 //   GATEWAYS={"bkash":["bkash"],"rocket":["rocket","16216"],
-//             "dgepayebl":["EBL"]}
+//             "dgepayebl":["DGePay"]}
 //
 // A scoped alias never consumes an OTP that is not its own, so two
 // gateways polling the same SIM cannot steal from each other.
@@ -873,9 +915,10 @@ app.post('/api/users/:id/reissue', usersGate, requireAdmin, requireIdentityLoade
 // Deactivate / reactivate.
 //
 // Deactivating revokes every live session on the spot, so their controls stop
-// responding mid-click rather than at token expiry. Their DEVICES keep
-// forwarding and their messages file to admin — nothing stops arriving while
-// you work out who should own that phone.
+// responding mid-click rather than at token expiry, AND their phones stop
+// forwarding — store.forwardingFor() declines every push from a device whose
+// owner is inactive. (This comment said the devices kept forwarding to admin,
+// which was reversed in server 4.27.0. Purge is the step that frees devices.)
 app.post('/api/users/:id/active', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const { active } = req.body || {};
     if (typeof active !== 'boolean') return res.status(400).json({ error: 'active must be boolean' });
@@ -954,21 +997,16 @@ app.post('/api/reload', requireAdmin, asyncRoute(async (req, res) => {
 }));
 
 app.get('/api/devices', usersGate, requireAdmin, (req, res) => {
-    res.json({ devices: store.users.listDevices(),
-               // Removed phones are still worth seeing: a device that vanished
-               // from this list with no trace is indistinguishable from one
-               // that was never installed.
-               revoked: store.users.listRevoked() });
-});
-
-// Undo a removal without anyone touching the phone.
-//
-// The admin removed it, so the admin can put it back. Requiring the username
-// here too would make a mis-click cost a trip to wherever that phone is.
-app.post('/api/devices/:id/restore', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
-    const r = store.users.restoreDevice(req.params.id);
-    if (!r.ok) return res.status(404).json({ error: r.error });
-    res.json({ success: true });
+    res.json({ devices: store.users.listDevices().map(d => Object.assign(d, {
+                   // The Clear Log this device SHOULD have done: the newer of the
+                   // broadcast one and its owner's targeted one. Compared with
+                   // d.clearedTs on the dashboard to show cleared / pending.
+                   clearTarget: store.commandsFor(d.id).clearLogTs || 0
+               })),
+               // Removed devices are NOT listed (4.39.0, Riad's rule): removed
+               // means gone from the dashboard until the app is reinstalled.
+               hideAfterDays: store.users.HIDE_AFTER_DAYS,
+               deleteAfterDays: store.users.DELETE_AFTER_DAYS });
 });
 
 app.post('/api/devices/:id/assign', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
@@ -982,6 +1020,23 @@ app.post('/api/devices/:id/rename', usersGate, requireAdmin, requireIdentityLoad
     const r = store.users.renameDevice(req.params.id, (req.body || {}).name);
     if (!r.ok) return res.status(404).json({ error: r.error });
     res.json({ success: true, device: r.device });
+});
+
+// Push a username to one phone, and make that user its owner (server 4.38.0).
+// See users.pushUsername for the two effects and why the push is confirmed by
+// the phone rather than assumed.
+app.post('/api/devices/:id/push-username', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
+    const id = String(req.params.id || '');
+    if (store.users.isRevoked(id)) {
+        return res.status(409).json({ error: 'This device was removed. It comes back only '
+            + 'when the app is reinstalled on it, as a new device.' });
+    }
+    const r = store.users.pushUsername(id, (req.body || {}).userId);
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error });
+    // Its own topic, so exactly this phone hears it. The poll carries the same
+    // value for a phone FCM cannot reach; the app de-duplicates by ts.
+    fcm.send('set_username', r.ts, 'device_' + id, { username: r.name });
+    res.json({ success: true, username: r.name, ts: r.ts, device: r.device });
 });
 
 // The number this phone's SIM actually is.
@@ -1037,8 +1092,8 @@ app.post('/api/register', requireApiKey, (req, res) => {
         // say so plainly rather than 404ing an app that will retry forever.
         return res.json({ success: true, usersEnabled: false });
     }
-    const { deviceId, model, name, claimedUser } = req.body || {};
-    const device = store.users.registerDevice(deviceId, { model, name, claimedUser });
+    const { deviceId, model, name, claimedUser, installId } = req.body || {};
+    const device = store.users.registerDevice(deviceId, { model, name, claimedUser, installId });
 
     // REMOVED, and not reactivated by this attempt. 200 rather than 403 on
     // purpose: the app reads 401/403 from this server as "the API key is
@@ -1048,7 +1103,7 @@ app.post('/api/register', requireApiKey, (req, res) => {
     // as the 200 on a declined /sms.
     if (device && device.revoked) {
         return res.json({ success: false, usersEnabled: true,
-                          revoked: true, needsUsername: true, error: device.error });
+                          revoked: true, needsUsername: false, error: device.error });
     }
     if (device && device.error) return res.status(400).json({ error: device.error });
     res.json({
@@ -1106,13 +1161,18 @@ app.get('/api/history/summary', historyGate, requireAdmin, asyncRoute(async (req
     const byDay = {};
     for (const r of rows) {
         const day = new Date(r.receivedAt).toISOString().slice(0, 10);
-        if (!byDay[day]) byDay[day] = { day, total: 0, fetched: 0, expired: 0, superseded: 0, no_code: 0 };
+        if (!byDay[day]) byDay[day] = { day, total: 0, fetched: 0, expired: 0, superseded: 0, no_code: 0, cleared: 0 };
         byDay[day].total++;
         if (byDay[day][r.outcome] !== undefined) byDay[day][r.outcome]++;
     }
     const totals = rows.reduce((a, r) => {
         a.total++; if (a[r.outcome] !== undefined) a[r.outcome]++; return a;
-    }, { total: 0, fetched: 0, expired: 0, superseded: 0, no_code: 0 });
+    }, { total: 0, fetched: 0, expired: 0, superseded: 0, no_code: 0, cleared: 0 });
+    // Of the codes that were extracted and then FINISHED ON THEIR OWN, how many
+    // were fetched. no_code (nothing to fetch) and cleared (an operator removed
+    // it) are not fetch failures, so they are not in the denominator — they
+    // were, and a run of promotional SMS read as a falling fetch rate.
+    const fetchable = totals.fetched + totals.expired + totals.superseded;
 
     res.json({
         days: Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day)),
@@ -1121,7 +1181,7 @@ app.get('/api/history/summary', historyGate, requireAdmin, asyncRoute(async (req
         limit: LIMIT,
         // The one number that is this system's health: of the codes it managed
         // to extract, how many were actually used.
-        fetchRate: totals.total ? Math.round((totals.fetched / totals.total) * 100) : null
+        fetchRate: fetchable ? Math.round((totals.fetched / fetchable) * 100) : null
     });
 }));
 
@@ -1252,7 +1312,7 @@ process.on('uncaughtException', (err) => {
 
 // ─── Start server ───────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`[server] GetOTP Render v${require('./package.json').version} on port ${PORT}`);
     console.log(`[server] POST /sms           — receive SMS`);
     console.log(`[server] GET  /get           — OTP fetch (add &wait=20 to long-poll)`);
@@ -1261,3 +1321,60 @@ app.listen(PORT, () => {
     console.log(`[server] GET  /              — dashboard`);
     console.log(`[server] GET  /health        — keepalive`);
 });
+
+
+// ─── Graceful shutdown ──────────────────────────────────────────
+//
+// =============================================================================
+// A REDEPLOY USED TO DROP WHATEVER WAS STILL WAITING TO BE SAVED.
+//
+// Render stops the old instance with SIGTERM on every deploy, and nothing here
+// listened for it. Config and identity writes are debounced by two seconds and
+// the archive flushes every thirty — so a filter saved, or a user created, just
+// before a deploy existed only in memory when the process died. A deploy is the
+// exact event Firestore was brought in to survive.
+//
+// On SIGTERM/SIGINT: stop accepting connections, push every pending Firestore
+// write and the archive queue, then exit. Bounded, because Render kills the
+// process anyway after its grace period, and a hung network must not turn a
+// clean stop into a forced one. Parked long-polls and SSE streams are not
+// waited for: their clients reconnect to the new instance on their own.
+// =============================================================================
+const SHUTDOWN_DEADLINE_MS = 10_000;
+// `var`, not `let`: POST /sms reads it, and is declared far above this line.
+var shuttingDown = false;
+
+async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[server] ${signal} — saving pending writes before exit`);
+    const hardStop = setTimeout(() => {
+        console.error('[server] Shutdown deadline reached — exiting with writes outstanding');
+        process.exit(0);
+    }, SHUTDOWN_DEADLINE_MS);
+    hardStop.unref();
+
+    try { server.close(); } catch (e) { /* already closed */ }
+    // LOOP, not once. flushNow awaits a write already in flight; a newer save
+    // queued behind it is re-armed on a 0 ms timer that would otherwise fire
+    // after process.exit. Repeat until nothing is pending or the deadline nears.
+    const writesDeadline = Date.now() + SHUTDOWN_DEADLINE_MS - 2000;
+    do {
+        try { await firestore.flushNow(); } catch (e) { /* logged inside */ }
+        const st = firestore.getStatus();
+        if (!st.pendingWrite) break;
+        // A write that FAILED will not succeed by being hammered for the next
+        // eight seconds; it is logged, and the state file still holds it.
+        if (st.lastWriteOk === false) break;
+        await new Promise(r => setTimeout(r, 50));
+    } while (Date.now() < writesDeadline);
+    try {
+        const n = await history.drain(Date.now() + SHUTDOWN_DEADLINE_MS - 1000);
+        if (n) console.log(`[server] Archived ${n} message(s) on the way out`);
+    } catch (e) { /* logged inside */ }
+    console.log('[server] Pending writes saved — exiting');
+    process.exit(0);
+}
+
+process.on('SIGTERM', () => { shutdown('SIGTERM'); });
+process.on('SIGINT',  () => { shutdown('SIGINT'); });

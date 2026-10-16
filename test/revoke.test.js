@@ -1,17 +1,22 @@
 /**
- * test/revoke.test.js — "Remove" has to mean removed.
+ * test/revoke.test.js — "Remove" means removed until the app is reinstalled,
+ * and devices nobody uses leave the list by themselves (server 4.39.0).
  *
  * =============================================================================
- * THE BUTTON USED TO DO NOTHING, AND THAT IS THE WHOLE POINT OF THIS FILE
+ * WHAT MUST HOLD
  *
- * The phone generates its own id and re-registers on every process start — an
- * FCM wake, the 4-minute alarm chain, a reboot. So removing a device deleted a
- * row that the same phone put straight back, unassigned, within minutes. It
- * looked like a revocation and was a refresh.
- *
- * A removal is now remembered, survives a reload, refuses registration, and
- * stops the device forwarding server-side. The only way back is a registration
- * that names an active user — or the admin allowing it back.
+ *   1. A removal is a standing block: remembered, survives a reload, refuses
+ *      the registration the app makes on every start, and stops forwarding
+ *      server-side whatever the phone believes.
+ *   2. There is NO way back except a reinstall: no username, no "Allow back".
+ *   3. A reinstall (same device id, a DIFFERENT installId) lifts it, and the
+ *      phone comes back as a NEW, UNASSIGNED device — owner, SIM number and
+ *      name of the removed row are not kept.
+ *   4. A removal recorded without an installId (an older app) is never lifted
+ *      by an installId.
+ *   5. A device silent for more than 7 days is flagged inactive (hidden on the
+ *      dashboard); after 15 days the hourly sweep deletes it. The activity
+ *      clock survives a reload, and an upgrade does not mass-delete.
  * =============================================================================
  *
  * Run: node test/revoke.test.js
@@ -32,149 +37,236 @@ const store = require('../lib/store');
 const users = require('../lib/users');
 
 store.loadIdentity();
-const rahim = users.createUser('Rahim');
-assert.ok(rahim.ok, 'setup: user created');
+assert.ok(users.createUser('Rahim').ok, 'setup: user created');
 
-const ID = 'cccccccccccccccc';
-users.registerDevice(ID, { model: 'Galaxy A14' });
+const DAY = 86_400_000;
+const ID        = 'cccccccccccccccc';
+const INSTALL_A = 'aaaaaaaaaaaaaaaa';
+const INSTALL_B = 'bbbbbbbbbbbbbbbb';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. Before removal: an ordinary device, forwarding, re-registering freely.
-// ─────────────────────────────────────────────────────────────────────────────
+users.registerDevice(ID, { model: 'Galaxy A14', installId: INSTALL_A });
+assert.ok(users.assignDevice(ID, 'rahim').ok, 'setup: assigned');
+users.setDeviceSim(ID, '01788888888');
+users.renameDevice(ID, "Rahim's phone");
 assert.strictEqual(store.forwardingFor(ID), true, 'a registered device forwards');
+assert.strictEqual(users.ownerOf(ID), 'rahim', 'setup: owned by Rahim before removal');
+assert.strictEqual(users.getDevice(ID).installId, INSTALL_A, 'the install is recorded');
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. REMOVAL IS A STANDING BLOCK, not a deletion.
-//
-// Enforced server-side, which is the only place it can be enforced: the phone
-// may be asleep, offline, or force-stopped by a battery manager and will never
-// have heard. That is precisely the phone you are removing.
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── 1. Removal is a standing block ─────────────────────────────────────────
 assert.strictEqual(users.removeDevice(ID).ok, true, 'removal succeeds');
 assert.strictEqual(users.isRevoked(ID), true, 'and is remembered');
+assert.strictEqual(users.getDevice(ID), null, 'and the row is gone from the list');
 assert.strictEqual(store.forwardingFor(ID), false,
     'a removed device must stop forwarding immediately, whatever it believes');
-assert.strictEqual(users.listRevoked().length, 1,
-    'and must be visible on the dashboard — a device that vanishes without trace '
-    + 'is indistinguishable from one that was never installed');
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 3. THE BUG THIS FIXES: a bare re-registration must NOT bring it back.
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── 2. No way back for the same install: not by restart, not by username ──
 {
-    const r = users.registerDevice(ID, { model: 'Galaxy A14' });
-    assert.strictEqual(r.revoked, true,
-        'the exact call the app makes on every process start must be refused');
-    assert.strictEqual(r.needsUsername, true, 'and must say what would lift it');
-    assert.ok(/username/i.test(r.error), 'in words a phone holder can act on: ' + r.error);
-    assert.strictEqual(users.getDevice(ID), null, 'no row may be created');
-    assert.strictEqual(store.forwardingFor(ID), false, 'and it still may not forward');
+    let r = users.registerDevice(ID, { model: 'Galaxy A14', installId: INSTALL_A });
+    assert.strictEqual(r.revoked, true, 'the same install re-registering is refused');
+    assert.strictEqual(r.needsUsername, false, 'and no username is asked for');
+    assert.ok(/reinstall/i.test(r.error), 'the message says how to come back: ' + r.error);
+    r = users.registerDevice(ID, { claimedUser: 'Rahim', installId: INSTALL_A });
+    assert.strictEqual(r.revoked, true, 'a valid username does NOT bring it back any more');
+    r = users.registerDevice(ID, {});
+    assert.strictEqual(r.revoked, true, 'nor a registration that carries no installId');
+    users.noteInstall(ID, INSTALL_A);
+    assert.strictEqual(users.isRevoked(ID), true, 'the same install on /sms or the poll lifts nothing');
+    users.noteInstall(ID, 'not-hex');
+    assert.strictEqual(users.isRevoked(ID), true, 'a malformed installId lifts nothing');
+    assert.strictEqual(users.getDevice(ID), null, 'and no row was created by any of it');
+    assert.strictEqual(typeof users.restoreDevice, 'undefined', '"Allow back" is gone');
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. A WRONG OR UNKNOWN USERNAME LIFTS NOTHING.
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── 3. Survives a reload ───────────────────────────────────────────────────
 {
-    assert.strictEqual(users.registerDevice(ID, { claimedUser: 'nobody' }).revoked, true,
-        'an unknown user must not reactivate');
-    users.setActive('rahim', false);
-    assert.strictEqual(users.registerDevice(ID, { claimedUser: 'Rahim' }).revoked, true,
-        'and neither must a DEACTIVATED one — deactivating is how you take someone '
-        + 'out of the system, so it cannot be a way back in');
-    users.setActive('rahim', true);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. THE WAY BACK: a registration naming an active user.
-//
-// Reactivation IS a registration that carries a claim — one path, one set of
-// rules — and succeeding at it assigns the phone to that user in the same act.
-// ─────────────────────────────────────────────────────────────────────────────
-{
-    const back = users.registerDevice(ID, { model: 'Galaxy A14', claimedUser: 'Rahim' });
-    assert.ok(back && back.id === ID, 'a valid username brings the device back: '
-        + JSON.stringify(back));
-    assert.strictEqual(users.isRevoked(ID), false, 'and clears the block');
-    assert.strictEqual(store.forwardingFor(ID), true, 'and forwarding resumes');
-    assert.strictEqual(users.ownerOf(ID), 'rahim',
-        'and records WHO brought it back, which is half the value of asking');
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 5b. THE ASSIGNMENT MUST SURVIVE THE ROUND TRIP.
-//
-// The phone forgets its claimed username the moment it is revoked — it is the
-// key to the gate, and a handset that still holds it is not a gate. So the
-// phone can no longer say who it belongs to, and if the server did not remember
-// then every device coming back would arrive as an unassigned stranger needing
-// to be re-linked by hand. Both ways back must be a true undo.
-// ─────────────────────────────────────────────────────────────────────────────
-{
-    users.setDeviceSim(ID, '01788888888');
-    users.renameDevice(ID, "Rahim's phone");
-    assert.strictEqual(users.ownerOf(ID), 'rahim', 'setup: assigned before removal');
-
-    users.removeDevice(ID);
-    assert.strictEqual(users.listRevoked()[0].userId, 'rahim',
-        'the removed list must say who it belonged to, so Allow back is an informed '
-        + 'click and not a hex string you have to recognise');
-
-    // Back via the username, with NO claim carried by the phone — which is
-    // exactly what a real reactivation looks like now.
-    const back = users.registerDevice(ID, { claimedUser: 'Rahim' });
-    assert.ok(back && back.id === ID, 'reactivation succeeds');
-    assert.strictEqual(users.ownerOf(ID), 'rahim', 'and the assignment is intact');
-    assert.strictEqual(users.getDevice(ID).name, "Rahim's phone", 'and the name');
-    assert.strictEqual(users.simFor(ID), '01788888888',
-        'and the SIM number — losing that would silently make this phone\'s OTPs '
-        + 'unfetchable again');
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 6. A REVOCATION MUST SURVIVE A RELOAD. One that a redeploy undoes is not one.
-// ─────────────────────────────────────────────────────────────────────────────
-{
-    users.removeDevice(ID);
     const snap = JSON.parse(JSON.stringify(users.snapshot()));
-    assert.ok(Array.isArray(snap.revokedDevices) && snap.revokedDevices.length === 1,
-        'the removal must be in the durable snapshot');
-
+    assert.strictEqual(snap.revokedDevices.length, 1, 'the removal is in the durable snapshot');
+    assert.strictEqual(snap.revokedDevices[0].installId, INSTALL_A, 'with the install it removed');
     users.load(snap);
-    assert.strictEqual(users.isRevoked(ID), true, 'and must come back from it');
-    assert.strictEqual(store.forwardingFor(ID), false, 'still blocked after a reload');
-    assert.strictEqual(users.registerDevice(ID, {}).revoked, true,
-        'and still unable to re-register itself');
+    assert.strictEqual(users.isRevoked(ID), true, 'and comes back from it');
+    assert.strictEqual(users.registerDevice(ID, { installId: INSTALL_A }).revoked, true,
+        'still unable to re-register itself after a reload');
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 7. THE ADMIN CAN UNDO IT WITHOUT ANYONE TOUCHING THE PHONE.
-//
-// A mis-click must not cost a trip to wherever that device is.
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── 4. A reinstall lifts it — as a NEW, UNASSIGNED device ──────────────────
 {
-    assert.strictEqual(users.restoreDevice(ID).ok, true, 'restore succeeds');
-    assert.strictEqual(users.isRevoked(ID), false, 'and lifts the block');
-    assert.strictEqual(users.restoreDevice(ID).ok, false,
-        'restoring something that is not removed must be refused, not silently "fine"');
-
-    assert.strictEqual(users.ownerOf(ID), 'rahim',
-        'Allow back must restore the device as it was, not as a stranger');
-    assert.strictEqual(users.simFor(ID), '01788888888', 'SIM number included');
-
-    const r = users.registerDevice(ID, {});
-    assert.ok(r && r.id === ID, 'and the phone re-registers by itself, with no username');
-    assert.strictEqual(users.ownerOf(ID), 'rahim',
-        'and registering with no claim must not undo the restored assignment');
+    const r = users.registerDevice(ID, { model: 'Galaxy A14', installId: INSTALL_B });
+    assert.ok(r && r.id === ID, 'a new install of the same phone registers: ' + JSON.stringify(r));
+    assert.strictEqual(users.isRevoked(ID), false, 'the removal is lifted');
+    assert.strictEqual(store.forwardingFor(ID), true, 'and it forwards again');
+    const d = users.getDevice(ID);
+    assert.strictEqual(d.userId, null, 'NOT assigned to the old owner');
+    assert.strictEqual(users.simFor(ID), null, 'and the old SIM number is not kept');
+    assert.strictEqual(d.name, 'Galaxy A14', 'nor the old name');
+    assert.strictEqual(d.installId, INSTALL_B, 'the new install is recorded');
+    assert.ok(users.snapshot().revokedDevices.every(x => x.id !== ID), 'and the record is gone');
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 8. Removing a device that does not exist is not a way to pre-block an id.
-// ─────────────────────────────────────────────────────────────────────────────
-assert.strictEqual(users.removeDevice('dddddddddddddddd').ok, false,
-    'there is nothing to remove, and inventing a revocation for an unknown id '
-    + 'would let a typo silently block a phone that has not registered yet');
-assert.strictEqual(users.isRevoked('dddddddddddddddd'), false, 'and nothing is recorded');
+// ─── 5. The first contact after a reinstall may be an SMS ───────────────────
+{
+    users.removeDevice(ID);
+    assert.strictEqual(store.forwardingFor(ID), false, 'removed again');
+    users.noteInstall(ID, 'dddddddddddddddd');      // what /sms does before deciding
+    assert.strictEqual(users.isRevoked(ID), false,
+        'a reinstalled phone\'s first SMS must not be declined as if it were still removed');
+    assert.strictEqual(store.forwardingFor(ID), true, 'it forwards');
+    assert.strictEqual(users.getDevice(ID), null, 'and it is a new device once it registers');
+    users.registerDevice(ID, { model: 'Galaxy A14', installId: 'dddddddddddddddd' });
+}
 
-console.log('ok — Remove is a standing block: it survives a reload, refuses the '
-    + 'registration the app makes on every start, stops forwarding server-side, and '
-    + 'is lifted only by an active username or by the admin');
+// ─── 6. A removal that did not know its install BINDS the first one to call ─
+//
+// A phone removed while offline (or whose row predates 4.39.0) has no confirmed
+// install. The first install to make contact is bound to the removal and stays
+// removed; a later, different install is a reinstall and lifts it. Without the
+// binding such a removal could never be lifted: the stable id survives the
+// reinstall (review finding).
+{
+    const OLD = 'eeeeeeeeeeeeeeee';
+    users.registerDevice(OLD, { model: 'Old app phone' });     // no installId: app < 4.34
+    users.removeDevice(OLD);
+    assert.strictEqual(users.snapshot().revokedDevices.find(r => r.id === OLD).installId, null,
+        'recorded without an install');
+    users.noteInstall(OLD, INSTALL_B);
+    assert.strictEqual(users.isRevoked(OLD), true, 'the first install to call is bound, and stays removed');
+    assert.strictEqual(users.snapshot().revokedDevices.find(r => r.id === OLD).installId, INSTALL_B,
+        'and the binding is durable');
+    assert.strictEqual(users.registerDevice(OLD, { installId: INSTALL_B }).revoked, true,
+        'registering from that install is refused');
+    users.noteInstall(OLD, INSTALL_A);
+    assert.strictEqual(users.isRevoked(OLD), false, 'a different install afterwards is a reinstall');
+
+    // A legacy record (4.36–4.38 shape) loads, stays blocked, and binds the same way.
+    const snap = JSON.parse(JSON.stringify(users.snapshot()));
+    snap.revokedDevices.push({ id: 'ffffffffffffffff', at: 1, device: { name: 'X', model: 'Y', userId: 'rahim' } });
+    users.load(snap);
+    assert.strictEqual(users.isRevoked('ffffffffffffffff'), true, 'a legacy record is still a removal');
+    users.noteInstall('ffffffffffffffff', INSTALL_A);
+    assert.strictEqual(users.isRevoked('ffffffffffffffff'), true, 'its first caller is bound, not let in');
+}
+
+// ─── 6b. A STALE stored install must not let the same install lift itself ───
+//
+// The review's repro: a reinstall seen while running from the cache is never
+// saved, the Firestore load puts the OLD installId back, and a removal that
+// recorded that stale value was lifted by the very install it removed.
+{
+    const S = '4444444444444444';
+    users.registerDevice(S, { model: 'Stale', installId: INSTALL_A });
+    const snap = JSON.parse(JSON.stringify(users.snapshot()));
+    snap.devices.find(d => d.id === S).installId = 'cccccccccccccccc';   // what the store still holds
+    users.load(snap);
+    assert.strictEqual(users.getDevice(S).installId, INSTALL_A,
+        'the install actually talking to us outranks the stale stored one');
+    users.removeDevice(S);
+    users.noteInstall(S, INSTALL_A);
+    assert.strictEqual(users.isRevoked(S), true, 'so the same install stays removed');
+
+    // After a restart nothing is confirmed: the removal records no install and binds.
+    users.noteInstall(S, INSTALL_B);                     // a reinstall: lifts
+    users.registerDevice(S, { model: 'Stale', installId: INSTALL_B });
+    delete users.getDevice(S).liveInstallId;             // as after a restart
+    users.removeDevice(S);
+    users.noteInstall(S, INSTALL_B);
+    assert.strictEqual(users.isRevoked(S), true, 'unconfirmed: the caller is bound, still removed');
+    users.noteInstall(S, INSTALL_A);
+    assert.strictEqual(users.isRevoked(S), false, 'and a different install lifts it');
+    // Unconfirmed but with a stored install: a REINSTALL as the first contact is
+    // recognised by the hint, not bound (it would have needed a second reinstall).
+    users.registerDevice(S, { model: 'Stale', installId: INSTALL_A });
+    delete users.getDevice(S).liveInstallId;             // restart; stored install is A
+    users.removeDevice(S);
+    users.load(JSON.parse(JSON.stringify(users.snapshot())));
+    assert.strictEqual(users.isRevoked(S), true, 'setup: removal survives a reload');
+    users.registerDevice(S, { model: 'Stale', installId: INSTALL_B });
+    assert.strictEqual(users.isRevoked(S), false, 'a reinstall first is let back in by the hint');
+    delete users.getDevice(S).liveInstallId;
+    users.removeDevice(S);
+    users.noteInstall(S, INSTALL_B);
+    assert.strictEqual(users.isRevoked(S), true, 'while the hinted install itself stays removed');
+}
+
+// ─── 6c. A reinstall that lifted a removal during the load is kept ──────────
+{
+    const L = '5555555555555555';
+    users.registerDevice(L, { model: 'Lifted', installId: INSTALL_A });
+    users.removeDevice(L);
+    const stored = JSON.parse(JSON.stringify(users.snapshot()));   // the removal, as saved
+    users.registerDevice(L, { model: 'Lifted', installId: INSTALL_B });   // reinstall, unsaved
+    assert.strictEqual(users.isRevoked(L), false, 'setup: lifted in memory');
+    users.load(stored);
+    assert.strictEqual(users.isRevoked(L), false,
+        'the load must not put back a removal that a reinstall lifted meanwhile');
+    assert.ok(users.getDevice(L), 'and the new device row is kept');
+}
+
+// ─── 6d. Two phones on one ANDROID_ID are flagged, not written every poll ───
+{
+    const T = '6666666666666666';
+    users.registerDevice(T, { model: 'Clone', installId: INSTALL_A });
+    users.noteInstall(T, INSTALL_B);
+    users.noteInstall(T, INSTALL_A);
+    const row = users.listDevices().find(d => d.id === T);
+    assert.strictEqual(row.sharedId, true, 'alternating installs are flagged for the dashboard');
+    assert.strictEqual(row.liveInstallId, undefined, 'and the bookkeeping is not published');
+}
+
+// ─── 7. An ordinary (not removed) reinstall keeps the device as it is ───────
+{
+    const P = '1111111111111111';
+    users.registerDevice(P, { model: 'Pixel', installId: INSTALL_A });
+    users.setDeviceSim(P, '01799999999');
+    users.registerDevice(P, { model: 'Pixel', installId: INSTALL_B });
+    assert.strictEqual(users.simFor(P), '01799999999',
+        'a reinstall of a phone nobody removed is the same device — it keeps its SIM');
+    assert.strictEqual(users.getDevice(P).installId, INSTALL_B, 'with the new install recorded');
+}
+
+// ─── 8. Inactivity: hidden after 7 days, deleted after 15 ───────────────────
+{
+    const Q = '2222222222222222';
+    users.registerDevice(Q, { model: 'Quiet phone', installId: INSTALL_A });
+    const row = () => users.listDevices().find(d => d.id === Q);
+    assert.strictEqual(row().inactive, false, 'a device just seen is active');
+
+    const d = users.getDevice(Q);
+    d.lastSeen = 0;
+    d.seenAt = Date.now() - 8 * DAY;
+    assert.strictEqual(row().inactive, true, 'silent for 8 days: flagged inactive (hidden)');
+    assert.strictEqual(users.sweepInactive(), 0, 'but NOT deleted yet');
+
+    // Inactivity survives a reload: seenAt is persisted.
+    users.load(JSON.parse(JSON.stringify(users.snapshot())));
+    assert.strictEqual(row().inactive, true, 'still inactive after a reload');
+
+    // Checking in makes it active again (the poll calls touchDevice).
+    users.touchDevice(Q);
+    assert.strictEqual(row().inactive, false, 'a poll brings it back into the list');
+
+    const d2 = users.getDevice(Q);
+    d2.lastSeen = 0;
+    d2.seenAt = Date.now() - 16 * DAY;
+    assert.strictEqual(users.sweepInactive(), 1, 'silent for 16 days: the sweep deletes it');
+    assert.strictEqual(users.getDevice(Q), null, 'gone');
+    assert.strictEqual(users.isRevoked(Q), false,
+        'deleted is not removed: if it ever checks in again it registers as a new device');
+    const back = users.registerDevice(Q, { model: 'Quiet phone', installId: INSTALL_A });
+    assert.ok(back && back.id === Q && back.userId === null, 'and does, unassigned');
+}
+
+// ─── 9. Upgrading from before 4.39.0 deletes nothing ────────────────────────
+{
+    const snap = JSON.parse(JSON.stringify(users.snapshot()));
+    for (const d of snap.devices) { delete d.seenAt; d.createdAt = Date.now() - 300 * DAY; }
+    users.load(snap);
+    assert.strictEqual(users.sweepInactive(), 0,
+        'stored devices with no seenAt get a fresh clock, not a mass deletion');
+    assert.ok(users.listDevices().every(d => !d.inactive), 'and none is hidden');
+}
+
+// ─── 10. Removing an unknown id is not a way to pre-block a phone ───────────
+assert.strictEqual(users.removeDevice('3333333333333333').ok, false, 'nothing to remove');
+assert.strictEqual(users.isRevoked('3333333333333333'), false, 'and nothing is recorded');
+
+console.log('ok — Remove lasts until a reinstall, which brings the phone back as a new '
+    + 'unassigned device; inactive devices are hidden after 7 days and deleted after 15');

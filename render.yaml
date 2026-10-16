@@ -1,19 +1,47 @@
+# Render Blueprint for the GetOTP server.
+#
+# sync: false means "set it in the Render dashboard; a Blueprint sync never
+# overwrites it". Every secret and every switch you choose per deployment is
+# sync: false, so re-syncing this file can never flip a feature or rotate a key.
+#
+# API_KEY is NOT generated here. It used to be (generateValue: true), which on a
+# fresh Blueprint created a random key that matched no APK — every phone was then
+# refused with 401. Set it to the same value as api_key in app/render.properties.
 services:
   - type: web
     name: getotp-server
     runtime: node
-    buildCommand: npm install
+    region: singapore
+    buildCommand: npm ci
     startCommand: node server.js
+    # Render waits for this before sending traffic to a new deploy, and stops the
+    # old instance with SIGTERM — which the server now handles by saving every
+    # pending write first (server 4.37.0).
+    healthCheckPath: /health
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: DASHBOARD_PASSWORD
         sync: false
       - key: API_KEY
-        generateValue: true
+        sync: false
       - key: FIREBASE_SERVICE_ACCOUNT
         sync: false
+      # Durable config, users and the archive. See .env.example for each.
+      - key: FIRESTORE_ENABLED
+        sync: false
+      - key: USERS_ENABLED
+        sync: false
+      - key: HISTORY_ENABLED
+        sync: false
+      - key: GATEWAYS
+        sync: false
+      # Used only when neither the state file nor Firestore has filters. The
+      # three recommended rules from FILTERS.md rather than the bare catch-all,
+      # which extracts payment amounts as codes.
       - key: OTP_PATTERNS
-        value: "(\\d{4,8})"
+        value: '[{"phoneNumber":"DEFAULT","patterns":["\\bis\\s+(\\d{4,8})\\b","\\b(?:OTP|One[- ]?Time Password|PIN|code)\\b[^0-9]{0,25}(\\d{4,8})\\b","(\\d{4,8})"]}]'
       - key: AUTO_DELETE_MINUTES
         value: "30"
-      - key: NODE_ENV
-        value: production
+      - key: OTP_MAX_AGE_SECONDS
+        value: "120"
