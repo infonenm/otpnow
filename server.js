@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.41.1
+ * server.js — GetOTP Render Server v4.41.3
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -36,7 +36,10 @@
  *   POST /api/auto-delete → Update auto-delete minutes (dashboard token auth)
  *   GET  /api/full-settings→ Full settings for dashboard (dashboard token auth)
  *   POST /api/register    → Device announces itself + its SIMs (API key)
- *   GET  /api/send/options, POST /api/send, GET /api/send/jobs, POST /api/send/cancel
+ *   GET  /api/send/options, POST /api/send, GET /api/send/jobs, POST /api/send/cancel,
+ *   POST /api/send/retry, POST /api/send/clear
+ *   POST /api/test → also wakes the phones; GET /api/test/status → who answered
+ *   POST /api/keep-online, GET /api/keep-online → phones stay awake until turned off (admin)
  *                         → Send real SMS from a phone's SIM (token auth, scoped by role)
  *   GET  /api/send/pull, POST /api/send/report → the phone's side of sending (API key)
  *   GET  /health          → Keepalive
@@ -52,6 +55,8 @@ const fcm     = require('./lib/fcm');
 const firestore = require('./lib/firestore');
 const history   = require('./lib/history');
 const outbox    = require('./lib/outbox');
+const wake      = require('./lib/wake');
+const keepOnline = require('./lib/keeponline');
 
 // Initialize FCM (silent no-op if FIREBASE_SERVICE_ACCOUNT not set)
 fcm.init();
@@ -67,6 +72,8 @@ store.loadIdentity();
 history.start();
 // The SMS outbox (4.41.0): loads its queue from Firestore, never blocking.
 outbox.start();
+wake.setBroadcast(store.broadcast);
+keepOnline.setBroadcast(store.broadcast);
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -314,6 +321,8 @@ app.post('/sms', requireApiKey, (req, res) => {
         const revoked = store.users.isRevoked(deviceId);
         console.log(`[server] Declined SMS from ${sender} — `
             + (revoked ? `device ${deviceId} has been removed` : 'forwarding is OFF'));
+        // Declined, but the phone DID answer a Test: it is awake.
+        if (deviceId && !revoked && sender === 'GetOTP-Test') wake.noteAnswer(deviceId, 'test');
         // globalRaw travels with EVERY state the app is told, not just the poll.
         // Sending only the effective value made an override look like an admin
         // toggle — see the note on globalRaw in /api/settings.
@@ -328,6 +337,8 @@ app.post('/sms', requireApiKey, (req, res) => {
     // app, which is simply not deduplicated — exactly today's behaviour.
     const result = store.addSms(sender, recipient || 'Unknown', message,
                                 arrivedAt || Date.now(), deviceId, msgId);
+    // A Test message is that phone answering a Test (any app version).
+    if (deviceId && sender === 'GetOTP-Test') wake.noteAnswer(deviceId, 'test');
     // `duplicate` is reported but the status stays 200 and `success` stays true,
     // deliberately: this is a message the server already HAS, so the device must
     // mark its row delivered and stop. Anything else would send it round again.
@@ -383,6 +394,13 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // Which dashboard Clear Log this phone has actually carried out — the
         // dashboard shows "log cleared" / "pending" per device from this.
         if (req.query.clearedTs) store.users.noteCleared(req.query.deviceId, req.query.clearedTs);
+        // The newest dashboard Test this phone woke up for (app 4.37.0).
+        if (Number(req.query.wokeTs) > 0) wake.noteAnswer(req.query.deviceId, 'woke', Number(req.query.wokeTs));
+        // Keep online (app 4.37.0): is it holding the phone awake, and may it
+        // (battery "Unrestricted")? Absent from an older app.
+        if (req.query.keepOnline !== undefined) {
+            keepOnline.noteReport(req.query.deviceId, req.query.keepOnline === '1', req.query.battExempt === '1');
+        }
     }
     const cmds = store.commandsFor(req.query.deviceId);
     const pushName = store.usersEnabled() ? store.users.pendingUsernameFor(req.query.deviceId) : null;
@@ -416,6 +434,12 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // offline for twenty minutes ran a twenty-minute-old Test or Get Latest
         // the moment it reconnected. The app applies the same two minutes.
         serverTime:       Date.now(),
+        // Keep online (4.41.3): { on, ts } for THIS phone. The phone holds a
+        // short lease renewed by each poll — see lib/keeponline.js. Omitted
+        // until the switch is used, so an older app and an unused switch see
+        // exactly what they saw before.
+        ...(req.query.deviceId && keepOnline.forDevice(req.query.deviceId)
+              ? { keepOnline: keepOnline.forDevice(req.query.deviceId) } : {}),
         // A username the admin pushed to THIS phone, until the phone confirms it
         // by registering with it. The poll is the carrier that survives a phone
         // without Play Services; FCM (device_<id> topic) is the fast one.
@@ -687,6 +711,9 @@ function commandTarget(req) {
     if (req.session.role !== 'admin') return req.session.userId;
     const t = (req.body || {}).target;
     if (t === undefined || t === null || t === '' || t === 'all') return null;
+    // Users switched off: there are no users to target, and a user topic would
+    // reach nobody while the dashboard said otherwise (review, 4.41.3).
+    if (!store.usersEnabled()) return false;
 
     const id = store.users.slug(t);
     if (!id) return false;
@@ -718,7 +745,34 @@ app.post('/api/test', requireToken, (req, res) => {
     if (rejectBadTarget(target, res)) return;
     const ts = store.triggerTestMessage(Date.now(), target);
     fcm.send('test', ts, topicFor(target));
-    res.json({ success: true, target: target || 'all' });
+    // Which phones it was aimed at, so the dashboard can show who answers
+    // (4.41.3: Test also wakes a sleeping phone — app 4.37.0).
+    const run = wake.start(ts, target, req.session);
+    res.json({ success: true, target: target || 'all', run });
+});
+
+// Keep online (4.41.3, admin only): phones stay awake until turned off.
+// { on: true, target } / { on: false }. The push is a signal — the phone asks
+// /api/settings for the state, so a stale or late push cannot turn it on.
+app.post('/api/keep-online', requireAdmin, (req, res) => {
+    const on = (req.body || {}).on === true;
+    let target = null;
+    if (on) {
+        target = commandTarget(req);
+        if (rejectBadTarget(target, res)) return;
+    }
+    const r = keepOnline.set(on, target, req.session);
+    for (const t of r.topicTargets) fcm.send('keep_online', r.status.ts, topicFor(t));
+    res.json({ success: true, status: r.status });
+});
+
+app.get('/api/keep-online', requireAdmin, (req, res) => {
+    res.json({ status: keepOnline.status() });
+});
+
+// The caller's newest Test: which phones answered (woke, or sent the test message).
+app.get('/api/test/status', requireToken, (req, res) => {
+    res.json({ run: wake.status(req.session) });
 });
 
 // Force the device to fetch and forward its newest SMS.
@@ -1160,9 +1214,21 @@ app.get('/api/send/options', usersGate, requireToken, (req, res) => {
 });
 
 app.post('/api/send', usersGate, requireToken, (req, res) => {
-    const r = outbox.createBatch(req.session, req.body);
+    // Only the public fields: retryOf / expectFromNumber are set by /retry alone.
+    const { fromDeviceId, fromSlot, to, message } = req.body || {};
+    const r = outbox.createBatch(req.session, { fromDeviceId, fromSlot, to, message });
     if (!r.ok) return res.status(r.status || 400).json({ error: r.error, problems: r.problems, skipped: r.skipped });
     res.json({ success: true, batchId: r.batchId, jobs: r.jobs, skipped: r.skipped });
+});
+
+// Retry one failed SMS as a NEW job (4.41.2): same SIM, recipient and text,
+// every send check applied again, at most once per job. See outbox.retry.
+app.post('/api/send/retry', usersGate, requireToken, (req, res) => {
+    const { jobId } = req.body || {};
+    if (!jobId) return res.status(400).json({ error: 'Give jobId' });
+    const r = outbox.retry(req.session, String(jobId));
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error, skipped: r.skipped });
+    res.json({ success: true, batchId: r.batchId, jobs: r.jobs });
 });
 
 app.get('/api/send/jobs', usersGate, requireToken, (req, res) => {
@@ -1175,6 +1241,15 @@ app.post('/api/send/cancel', usersGate, requireToken, (req, res) => {
     if (!jobId && !batchId) return res.status(400).json({ error: 'Give jobId or batchId' });
     res.json({ success: true, cancelled: outbox.cancel(req.session,
         { jobId: jobId ? String(jobId) : null, batchId: batchId ? String(batchId) : null }) });
+});
+
+// Delete finished SMS from the outbox (4.41.3): one, several, or all you may
+// clear. Text and number are erased at once; see outbox.clear.
+app.post('/api/send/clear', usersGate, requireToken, (req, res) => {
+    const { jobIds, all } = req.body || {};
+    const r = outbox.clear(req.session, { jobIds: Array.isArray(jobIds) ? jobIds : undefined, all: all === true });
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error });
+    res.json({ success: true, cleared: r.cleared });
 });
 
 // Admin: who may send, and how many per day.

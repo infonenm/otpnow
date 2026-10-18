@@ -71,14 +71,24 @@ const body = saveConfig.slice(0, saveConfig.indexOf('\n    }') + 6);
 
 assert.ok(/if\s*\(!fRes\.ok\)/.test(body),
     'saveConfig must check the /api/filters response before claiming success');
-assert.ok(body.indexOf('showConfigError') < body.indexOf("notify('💾 Settings saved')"),
+assert.ok(body.indexOf("notify('💾 Saved')") > 0
+       && body.indexOf('showConfigError') < body.indexOf("notify('💾 Saved')"),
     'a rejection must be surfaced, and before any success message');
 assert.ok(/problems/.test(html),
     "the server's per-pattern 'problems' list must be rendered, not just the status code");
 assert.ok(/id="configError"/.test(html),
     'the modal needs somewhere to put the reason');
-assert.ok(body.indexOf('return;') < body.indexOf("closeConfig()"),
-    'a failed save must not close the modal — the rejected patterns stay on screen');
+// 4.41.2: Settings is a page, and a save never leaves it. The edit counts as
+// saved (setConfigBase) only after BOTH replies were checked.
+assert.strictEqual(body.indexOf('closeConfig()'), -1,
+    'a save must not close the page — rejected patterns stay on screen');
+// 4.41.3 review: what was SENT is what is recorded as saved, and only after
+// the server accepted it — an edit made during the request stays unsaved.
+assert.ok(body.indexOf('cfgBase.filters = JSON.stringify(sendFilters)') > body.indexOf('if (!fRes.ok)')
+       && body.indexOf('cfgBase.autoDelete = sendMins') > body.indexOf('if (!aRes.ok)'),
+    'a setting counts as saved only after the server accepted exactly what was sent');
+assert.ok(!/setConfigBase\(\)/.test(body),
+    'saving must not snapshot the screen as saved — it may hold an edit made during the request');
 
 console.log('ok — same-sender rules merge, fallbacks run, order preserved, '
     + 'and a refused pattern is shown');

@@ -367,6 +367,60 @@
     }
     .config-error.show{display:block}
 
+    /* ── Confirm box (4.41.3): centred, replaces the browser's confirm() ── */
+    .cbox-backdrop{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;
+        padding:16px;background:rgba(4,6,14,.72);backdrop-filter:blur(3px)}
+    .cbox-backdrop.open{display:flex;animation:fadein .14s ease-out}
+    .cbox{width:100%;max-width:460px;max-height:calc(100vh - 32px);overflow:auto;background:var(--bg-panel);
+        border:1px solid var(--border-h);border-radius:var(--radius-lg);padding:22px 22px 18px;
+        box-shadow:0 24px 60px rgba(0,0,0,.6)}
+    .cbox-title{font-size:17px;font-weight:700;color:var(--text-1);line-height:1.4;white-space:pre-wrap;word-break:break-word}
+    .cbox-body{margin-top:10px;font-size:14px;line-height:1.6;color:var(--text-2);white-space:pre-wrap;word-break:break-word}
+    .cbox-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+    .cbox-actions .a-btn{height:40px;padding:0 16px}
+    .cbox-ok{height:40px;padding:0 18px;border:none;border-radius:10px;background:var(--cyan);color:var(--on-cyan);
+        font-weight:700;font-size:14px;cursor:pointer}
+    .cbox-ok.danger{background:var(--red);color:#1A0609}
+    .cbox-ok:focus-visible,.cbox-actions .a-btn:focus-visible{outline:2px solid var(--cyan-soft);outline-offset:2px}
+
+    /* ── Filters & Settings (4.41.2) ─────────────────────────── */
+    .settings-page{max-width:1320px}
+    .settings-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start}
+    @media (min-width:1180px){ .settings-grid{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)} }
+    .s-col{display:flex;flex-direction:column;gap:20px;min-width:0}
+    .s-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px 22px;min-width:0}
+    .s-card.danger{border-color:var(--red-line);background:linear-gradient(180deg,var(--red-dim),var(--bg-card) 120px)}
+    .s-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;
+        margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+    .s-head h4{font-size:17px;font-weight:700;color:var(--text-1);letter-spacing:-0.005em}
+    .s-sub{font-size:12.5px;color:var(--text-3)}
+    .s-sub.warn{color:var(--red-soft)}
+    .s-card h5{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;font-weight:600;
+        color:var(--text-2);text-transform:uppercase;letter-spacing:0.14em;margin-bottom:10px}
+    .s-card .config-section{margin-bottom:22px}
+    .s-card .config-section.last{margin-bottom:0}
+    .inline-setting{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px;color:var(--text-2)}
+    .inline-setting input{width:90px;height:40px;padding:0 12px;background:var(--bg-sunk);border:1px solid var(--border-h);
+        border-radius:12px;color:var(--text-1);font-family:var(--mono);font-size:14px;outline:none}
+    .inline-setting input:focus{border-color:var(--cyan)}
+    .s-status{padding:12px 0;border-top:1px solid var(--border)}
+    .s-head + .s-status{border-top:none;padding-top:0}
+    .s-status:last-child{padding-bottom:0}
+    .s-dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--text-4)}
+    .s-dot.ok{background:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim)}
+    .s-dot.warn{background:var(--orange);box-shadow:0 0 0 3px var(--orange-dim)}
+    .s-dot.bad{background:var(--red);box-shadow:0 0 0 3px var(--red-dim)}
+    .s-save{position:sticky;bottom:12px;z-index:5;display:flex;align-items:center;justify-content:flex-end;gap:10px;
+        flex-wrap:wrap;margin-top:22px;padding:12px 14px;border-radius:14px;background:var(--bg-sunk);border:1px solid var(--border)}
+    .s-save.dirty{border-color:var(--orange-line);background:var(--orange-dim);box-shadow:0 8px 28px rgba(0,0,0,.45)}
+    .s-save-state{margin-right:auto;font-size:13px;color:var(--text-3)}
+    .s-save.dirty .s-save-state{color:var(--orange-soft);font-weight:600}
+    .s-save .save-config-btn{width:auto;height:40px;padding:0 20px;font-size:14px}
+    .s-save .save-config-btn:disabled{background:var(--bg-hover);color:var(--text-4);cursor:default;filter:none}
+    .s-save .a-btn[hidden]{display:none}
+    .config-add button.danger-btn{background:var(--red-dim);border-color:var(--red-line);color:var(--red-soft)}
+    .config-add button.danger-btn:hover{background:#2A141E}
+
     /* ── Users & devices ────────────────────────────────────── */
     .admin-row{display:flex;gap:10px;align-items:center;padding:10px 12px;margin-bottom:8px;background:var(--bg-sunk);
         border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;flex-wrap:wrap}
@@ -547,6 +601,11 @@
     .ob .h{display:flex;align-items:center;gap:8px}
     .ob .to{font-family:var(--mono);font-size:14px}
     .ob .lbl{font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+    .ob-clear{height:30px;padding:0 10px;font-size:12px}
+    .ob-clear[hidden]{display:none}
+    .ob .del{flex:none;width:26px;height:26px;border:none;border-radius:8px;background:none;color:var(--text-4);
+        cursor:pointer;font-size:13px;line-height:1}
+    .ob .del:hover{color:var(--red-soft);background:var(--red-dim)}
     .ob .st{margin-left:auto;flex:none;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;font-weight:600;padding:3px 9px;border-radius:9px;text-transform:uppercase}
     .st-queued{background:var(--bg-hover);color:var(--text-2)}
     .st-dispatched,.st-sending{background:var(--gold-dim);color:var(--gold)}
@@ -561,6 +620,31 @@
     .ob .a-btn{align-self:flex-start;height:30px}
 
     /* ── Toast ──────────────────────────────────────────────── */
+    .wake-panel{position:fixed;top:76px;right:20px;z-index:900;width:380px;max-width:calc(100vw - 32px);
+        max-height:calc(100vh - 100px);overflow:auto;background:var(--bg-panel);border:1px solid var(--border-h);
+        border-radius:var(--radius-lg);box-shadow:0 18px 50px rgba(0,0,0,.55);padding:14px 16px;animation:fadein .16s ease-out}
+    .wake-panel[hidden]{display:none}
+    .ko-btn .ko-dot{width:8px;height:8px;border-radius:50%;background:var(--text-4);flex:none}
+    .ko-btn.on{border-color:var(--cyan-line);background:var(--cyan-dim);color:var(--cyan-soft)}
+    .ko-btn.on .ko-dot{background:var(--cyan);box-shadow:0 0 0 3px rgba(61,217,255,.18);animation:kopulse 1.6s ease-in-out infinite}
+    @keyframes kopulse{50%{box-shadow:0 0 0 6px rgba(61,217,255,0)}}
+    .ko-off{width:100%;margin-top:12px;height:38px;color:var(--red-soft);border-color:var(--red-line)}
+    .wp-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+    .wp-head b{font-size:15px}
+    .wp-sub{font-size:12px;color:var(--text-3)}
+    .wp-x{margin-left:auto;width:30px;height:30px;border-radius:9px;border:1px solid var(--border-h);background:var(--bg-sunk);
+        color:var(--text-2);cursor:pointer}
+    .wp-list{display:flex;flex-direction:column;gap:6px}
+    .wp-row{display:flex;align-items:flex-start;gap:10px;padding:9px 10px;border-radius:10px;background:var(--bg-sunk);border:1px solid var(--border)}
+    .wp-row .s-dot{margin-top:6px}
+    .wp-row .n{font-size:13.5px;font-weight:600;color:var(--text-1);word-break:break-word}
+    .wp-row .d{font-size:12px;color:var(--text-3);margin-top:2px;line-height:1.5}
+    .wp-row.ok .d{color:var(--cyan-soft)}
+    .wp-row.bad .d{color:var(--red-soft)}
+    .wp-hint{margin-top:10px;font-size:12.5px;line-height:1.6;color:var(--orange-soft);background:var(--orange-dim);
+        border:1px solid var(--orange-line);border-radius:10px;padding:9px 11px}
+    .wp-hint[hidden]{display:none}
+    @media (max-width:640px){ .wake-panel{left:16px;right:16px;width:auto;top:auto;bottom:16px;max-height:60vh} }
     .notification{
         position:fixed;bottom:24px;right:24px;background:var(--bg-panel);border:1px solid var(--cyan-line);color:var(--text-1);
         padding:14px 18px;border-radius:14px;box-shadow:var(--shadow);transform:translateY(12px);opacity:0;
@@ -649,8 +733,11 @@
             <button id="overrideBtn" class="tb-btn user-only" onclick="startOverride()" style="display:none"></button>
             <button id="forwardToggleBtn" class="forward-toggle-btn disabled admin-only" onclick="toggleForwarding()" disabled>…</button>
 
-            <button class="primary-btn" id="sendOpenBtn" onclick="openSend()" title="Send a real SMS from one of your phones">
-                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8l11-5-4 11-2-4.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path></svg>Send SMS</button>
+            <!-- Keep online (4.41.3): replaced the top-bar Send SMS — that one is
+                 in the rail. Admin only. ON until the admin turns it off. -->
+            <button class="tb-btn ko-btn admin-only" id="keepOnlineBtn" onclick="keepOnlineClick()"
+                    title="Keep the selected phones awake and online until you turn this off">
+                <span class="ko-dot"></span><span id="keepOnlineLabel">Keep online</span></button>
 
             <div id="barMenu" class="menu" hidden></div>
         </header>
@@ -678,7 +765,7 @@
                     History</button>
                 <button class="nav-item admin-only" data-nav="config" onclick="closeAllPanels();openConfig();loadAdmin()">
                     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M3 5h12M3 9h12M3 13h12" stroke-linecap="round"></path></svg>
-                    Filters &amp; Settings</button>
+                    Filters &amp; Settings<span class="nav-badge warn" id="navConfigDirty" hidden title="Unsaved filter changes">•</span></button>
                 <!-- What used to hide behind the ⋯ menu, in plain sight (Riad, 4.41.1). -->
                 <div class="nav-sep"></div>
                 <button class="nav-item small" id="clearLogBtn" onclick="clearForwardLog()" title="Clears the forwarding log on the phones (the target in the top bar applies)">
@@ -741,50 +828,75 @@
 
                 <!-- FILTERS & SETTINGS -->
                 <div id="configOverlay" class="config-overlay">
-                    <div class="config-modal" role="region" aria-label="Filters and settings">
+                    <!-- Three cards (4.41.2): what you edit and Save, what you only read,
+                         and what applies the moment you click. They used to be one long
+                         list with "Save all changes" under the server controls, which it
+                         never saved. -->
+                    <div class="config-modal settings-page" role="region" aria-label="Filters and settings">
                         <h3>Filters &amp; Settings <button class="config-close" onclick="closeConfig()" aria-label="Close">✕</button></h3>
-                        <div class="config-section"><h4>Default OTP Patterns</h4><div id="defaultPatternsList"></div>
-                            <div class="config-add"><input id="newDefaultPattern" placeholder='Regex e.g. (\d{4,8})'><button onclick="addDefaultPattern()">+ Add</button></div>
-                        </div>
-                        <div class="config-section"><h4>Number-Specific Rules</h4><div id="numberRulesList"></div>
-                            <div class="config-add"><input id="newRulePhone" placeholder="Phone / sender" style="max-width:160px"><input id="newRulePattern" placeholder="Pattern"><button onclick="addNumberRule()">+ Add</button></div>
-                        </div>
-                        <div class="config-section"><h4>Settings</h4>
-                            <div class="setting-row"><label for="cfgAutoDelete">Auto-delete (minutes)</label><input type="number" id="cfgAutoDelete" min="1" max="1440" value="30"></div>
-                        </div>
-                        <!-- send() is fire-and-forget by design, so a broken service account
-                             is silent: this is the first place to look when push feels slow. -->
-                        <div class="config-section"><h4>Push (FCM)</h4>
-                            <div id="fcmStatus" class="fcm-status">—</div>
-                        </div>
-                        <!-- Which source the running filters came from, and whether your last
-                             save actually reached durable storage. -->
-                        <div class="config-section"><h4>Config storage</h4>
-                            <div id="configStatus" class="fcm-status">—</div>
-                        </div>
-                        <div class="config-section"><h4>History archive</h4>
-                            <div id="archiveStatus" class="fcm-status">—</div>
-                        </div>
-                        <div id="settingsNotice" class="config-error admin-notice"></div>
-                        <div class="config-section"><h4>Allowed server hosts</h4>
-                            <div id="hostsList"></div>
-                            <div class="config-add"><input id="newHost" placeholder="spare.onrender.com"><button onclick="addHost()">+ Add</button></div>
-                        </div>
-                        <div class="config-section"><h4>Move phones to another server</h4>
-                            <div class="fcm-status" style="margin-bottom:10px">
-                                Pushes the new address to every installed app over FCM — no reinstall.
-                                The host must be on the allowed list above, or the phones will refuse it.
-                                <span class="fcm-idle">A phone with no Play Services, or one an OEM battery
-                                manager has force-stopped, will not receive this and must be changed by hand.</span>
+                        <div class="settings-grid">
+                            <section class="s-card" aria-labelledby="sFiltersTitle">
+                                <div class="s-head"><h4 id="sFiltersTitle">OTP filters</h4>
+                                    <span class="s-sub">Saved together with the Save button</span></div>
+                                <div class="config-section"><h5>Default OTP patterns</h5><div id="defaultPatternsList"></div>
+                                    <div class="config-add"><input id="newDefaultPattern" placeholder='Regex e.g. (\d{4,8})'><button onclick="addDefaultPattern()">+ Add</button></div>
+                                </div>
+                                <div class="config-section"><h5>Number-specific rules</h5><div id="numberRulesList"></div>
+                                    <div class="config-add"><input id="newRulePhone" placeholder="Phone / sender" style="max-width:170px"><input id="newRulePattern" placeholder="Pattern"><button onclick="addNumberRule()">+ Add</button></div>
+                                </div>
+                                <div class="config-section last"><h5>Inbox</h5>
+                                    <div class="inline-setting"><label for="cfgAutoDelete">Delete messages from the inbox after</label>
+                                        <input type="number" id="cfgAutoDelete" min="1" max="1440" value="30" oninput="noteAutoDeleteDraft()">
+                                        <span>minutes</span></div>
+                                </div>
+                                <!-- Filled by saveConfig() when the server REFUSES a pattern. -->
+                                <div id="configError" class="config-error"></div>
+                                <div class="s-save">
+                                    <span id="cfgSaveState" class="s-save-state">No unsaved changes</span>
+                                    <button id="cfgDiscardBtn" class="a-btn" onclick="discardConfig()" hidden>Discard</button>
+                                    <button id="cfgSaveBtn" class="save-config-btn" onclick="saveConfig()" disabled>Save filters</button>
+                                </div>
+                            </section>
+
+                            <div class="s-col">
+                                <section class="s-card" aria-labelledby="sStatusTitle">
+                                    <div class="s-head"><h4 id="sStatusTitle">System status</h4>
+                                        <span class="s-sub">Read only</span></div>
+                                    <!-- send() is fire-and-forget by design, so a broken service account
+                                         is silent: this is the first place to look when push feels slow. -->
+                                    <div class="s-status"><h5><span class="s-dot" id="dotFcm"></span>Push (FCM)</h5>
+                                        <div id="fcmStatus" class="fcm-status">—</div></div>
+                                    <!-- Which source the running filters came from, and whether your last
+                                         save actually reached durable storage. -->
+                                    <div class="s-status"><h5><span class="s-dot" id="dotConfig"></span>Config storage</h5>
+                                        <div id="configStatus" class="fcm-status">—</div></div>
+                                    <div class="s-status"><h5><span class="s-dot" id="dotArchive"></span>History archive</h5>
+                                        <div id="archiveStatus" class="fcm-status">—</div></div>
+                                </section>
+
+                                <section class="s-card danger" aria-labelledby="sServersTitle">
+                                    <div class="s-head"><h4 id="sServersTitle">Servers</h4>
+                                        <span class="s-sub warn">Applies immediately — no Save</span></div>
+                                    <div id="settingsNotice" class="config-error admin-notice"></div>
+                                    <div class="config-section"><h5>Allowed server hosts</h5>
+                                        <div id="hostsList"></div>
+                                        <div class="config-add"><input id="newHost" placeholder="spare.onrender.com"><button onclick="addHost()">+ Add</button></div>
+                                    </div>
+                                    <div class="config-section last"><h5>Move phones to another server</h5>
+                                        <div class="fcm-status" style="margin-bottom:10px">
+                                            Pushes the new address to every installed app over FCM — no reinstall.
+                                            The host must be on the allowed list above, or the phones will refuse it.
+                                            <span class="fcm-idle">A phone with no Play Services, or one an OEM battery
+                                            manager has force-stopped, will not receive this and must be changed by hand.</span>
+                                        </div>
+                                        <div class="config-add">
+                                            <input id="newServerUrl" placeholder="https://spare.onrender.com">
+                                            <button class="danger-btn" onclick="pushServerUrl()">Push to all phones</button>
+                                        </div>
+                                    </div>
+                                </section>
                             </div>
-                            <div class="config-add">
-                                <input id="newServerUrl" placeholder="https://spare.onrender.com">
-                                <button onclick="pushServerUrl()">Push to all phones</button>
-                            </div>
                         </div>
-                        <!-- Filled by saveConfig() when the server REFUSES a pattern. -->
-                        <div id="configError" class="config-error"></div>
-                        <button class="save-config-btn" onclick="saveConfig()">Save all changes</button>
                     </div>
                 </div>
 
@@ -898,7 +1010,8 @@
                             </section>
                             <aside aria-label="Outbox">
                                 <div class="step">
-                                    <div class="step-head"><h4>Outbox</h4><span class="step-hint">updates live</span></div>
+                                    <div class="step-head"><h4>Outbox</h4><span class="step-hint">updates live</span>
+                                        <button class="a-btn ob-clear" id="obClearBtn" onclick="clearOutbox()" hidden>Clear finished</button></div>
                                     <div id="sendQuota" class="quota">—</div>
                                     <div id="outboxList" class="outbox"></div>
                                 </div>
@@ -928,6 +1041,21 @@
     </div>
 
     <div id="notification" class="notification" role="status" aria-live="polite"></div>
+    <!-- Keep online (4.41.3): which phones are being held awake. -->
+    <div id="koPanel" class="wake-panel" role="region" aria-label="Keep online" hidden>
+        <div class="wp-head"><b>Keep online</b><span id="koSub" class="wp-sub"></span>
+            <button class="wp-x" onclick="closeKoPanel()" aria-label="Close">✕</button></div>
+        <div id="koList" class="wp-list" aria-live="polite"></div>
+        <div id="koHint" class="wp-hint" hidden></div>
+        <button class="a-btn ko-off" id="koOffBtn" onclick="setKeepOnline(false)">Turn off</button>
+    </div>
+    <!-- Phone check (4.41.3): which phones answered the last Test — Test also wakes them. -->
+    <div id="wakePanel" class="wake-panel" role="region" aria-label="Phone check" hidden>
+        <div class="wp-head"><b>Phone check</b><span id="wpSub" class="wp-sub"></span>
+            <button class="wp-x" onclick="closeWakePanel()" aria-label="Close">✕</button></div>
+        <div id="wpList" class="wp-list" aria-live="polite"></div>
+        <div id="wpHint" class="wp-hint" hidden></div>
+    </div>
 
     <script>
     // ═══════════════════════════════════════════════════════════
@@ -1047,7 +1175,30 @@
         // written it since the password stopped being stored client-side.)
         if (eventSource) { eventSource.close(); eventSource = null; }
         allMessages = {};
+        // NOTHING of this session may reach the next one on this browser
+        // (review, 4.41.3): an admin page left open, the floating panels and
+        // their timers, the outbox, an unsent composer, unsaved filter edits.
+        resetSessionUi();
         showLogin();
+    }
+
+    function resetSessionUi() {
+        try { if (confirmResolve) { const r = confirmResolve; confirmResolve = null; r(false); }
+              const cb = document.getElementById('confirmBox'); if (cb) cb.classList.remove('open'); } catch (e) { }
+        try { closeAllPanels(); } catch (e) { }
+        try { closeWakePanel(); } catch (e) { }
+        try { closeKoPanel(); } catch (e) { }
+        if (koTicker) { clearInterval(koTicker); koTicker = null; }
+        koStatus = null;
+        try { renderKeepOnline(); } catch (e) { }
+        outboxJobs = {};
+        outboxLoaded = false;
+        sendOpts = null; sendFromKey = ''; sendRecipients = [];
+        const msg = document.getElementById('sendMessage'); if (msg) msg.value = '';
+        configFilters = [];
+        autoDeleteMinutes = 30;
+        setConfigBase();
+        startPage = '';
     }
 
     function authHeaders() { return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }; }
@@ -1071,8 +1222,7 @@
             if (sRes.ok) {
                 const s = await sRes.json();
                 globalForwarding = s.globalForwarding;
-                configFilters = s.filters || [];
-                autoDeleteMinutes = s.autoDeleteMinutes || 30;
+                applyServerConfig({ filters: s.filters || [], autoDeleteMinutes: s.autoDeleteMinutes || 30 });
                 if (s.otpMaxAgeSeconds > 0) otpMaxAgeMs = s.otpMaxAgeSeconds * 1000;
                 fcmStatus = s.fcm || null;
                 configStatus = s.config || null;
@@ -1142,14 +1292,30 @@
 
         // An SMS sent from the dashboard changed state (4.41.0). Scoped by the
         // server: the sender, the SIM's owner and admins only.
+        // A phone answered the Test this person pressed (4.41.3).
+        // Keep online changed, or a phone reported holding / not (admin only).
+        eventSource.addEventListener('keep_online', e => {
+            koStatus = JSON.parse(e.data);
+            koLocalAt = Date.now();
+            renderKeepOnline();
+        });
+
+        eventSource.addEventListener('wake_update', e => {
+            const run = JSON.parse(e.data);
+            if (!wakeRun || run.pressedBy !== me.userId || run.ts !== wakeRun.ts) return;
+            wakeRun = run;
+            renderWakePanel();
+        });
+
         eventSource.addEventListener('send_update', e => {
             const job = JSON.parse(e.data);
+            if (job.deleted) { delete outboxJobs[job.id]; scheduleOutboxRender(); return; }
             const before = outboxJobs[job.id];
             outboxJobs[job.id] = job;
             scheduleOutboxRender();
             if (before && before.status !== job.status
                     && (job.status === 'failed' || job.status === 'undelivered')) {
-                notify('SMS to ' + job.to + ' failed — ' + (job.error || job.status));
+                notify('SMS to ' + job.to + ' failed — ' + (job.errorText || job.error || job.status));
             }
         });
 
@@ -1180,8 +1346,8 @@
                 // "Forwarding ON" after the admin had switched it off.
                 renderOverrideButton();
             }
-            if (d.key === 'autoDeleteMinutes') autoDeleteMinutes = d.value;
-            if (d.key === 'filters') configFilters = d.value;
+            if (d.key === 'autoDeleteMinutes') applyServerConfig({ autoDeleteMinutes: d.value });
+            if (d.key === 'filters') applyServerConfig({ filters: d.value });
             if (d.key === 'override') {
                 // Ignored entirely before, so "N min left" never counted down
                 // and never cleared at expiry until the page was reloaded.
@@ -1241,7 +1407,7 @@
         who.title = isAdmin
             ? 'Signed in as admin — your actions affect every user'
             : 'Signed in as ' + me.userId + ' — you see and control only your own phones';
-        if (isAdmin) fillTargetDropdown();
+        if (isAdmin) { fillTargetDropdown(); loadKeepOnline(); }
         renderOverrideButton();
     }
 
@@ -1409,6 +1575,10 @@
      */
     document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
+        // The confirm box answers its own Escape ("no") — it must not ALSO
+        // close the page under it (found in 4.41.3's browser check).
+        const cb = document.getElementById('confirmBox');
+        if (cb && cb.classList.contains('open')) return;
         const menu = document.getElementById('barMenu');
         if (menu.classList.contains('open')) { closeMenu(); return; }
         // FIRST in the chain, because it is the topmost thing on screen. Without
@@ -1663,7 +1833,7 @@
     }
 
     async function clearAllMessages() {
-        if (!confirm('Delete all SMS from server?')) return;
+        if (!(await askConfirm('Delete all SMS from server?', { ok: 'Delete all', danger: true }))) return;
         await authFetch('/api/clear-all', { method: 'POST', headers: authHeaders() });
     }
 
@@ -1686,8 +1856,229 @@
         btn.disabled = true;
         const res = await authFetch('/api/test', { method: 'POST', headers: authHeaders(),
             body: JSON.stringify({ target: commandTargetValue() }) });
-        if (res) notify('📡 Test message sent to devices');
+        if (res) {
+            notify('📡 Test sent — waking the phones');
+            try { const d = await res.json(); if (d.run) showWakeRun(d.run); } catch (e) { /* the toast is enough */ }
+        }
         setTimeout(() => btn.disabled = false, 3000);
+    }
+
+    // ── Phone check (4.41.3) ─────────────────────────────────────
+    //
+    // Test also WAKES the phones (app 4.37.0). This panel lists the phones the
+    // Test was aimed at and fills in as each answers — by waking and reporting
+    // (4.37.0+, even with forwarding off) or by its test message (any version).
+    // Times are the server's; only the countdown uses this browser's clock,
+    // measured from when the answer to the click arrived.
+    let wakeRun = null, wakeLocalStart = 0, wakeTicker = null, wakeTicks = 0;
+
+    function showWakeRun(run) {
+        wakeRun = run;
+        wakeLocalStart = Date.now();
+        wakeTicks = 0;
+        closeKoPanel();                         // same corner — one panel at a time
+        document.getElementById('wakePanel').hidden = false;
+        renderWakePanel();
+        if (wakeTicker) clearInterval(wakeTicker);
+        wakeTicker = setInterval(wakeTick, 1000);
+    }
+
+    function wakeOver() {
+        return !wakeRun || Date.now() - wakeLocalStart > (wakeRun.deadline - wakeRun.startedAt);
+    }
+
+    async function wakeTick() {
+        wakeTicks++;
+        // A backstop for a missed live update: re-read every 5 s while waiting.
+        if (wakeTicks % 5 === 0 || wakeOver()) {
+            try {
+                const res = await fetch('/api/test/status', { headers: authHeaders() });
+                if (res.ok) {
+                    const d = await res.json();
+                    if (d.run && wakeRun && d.run.ts === wakeRun.ts) wakeRun = d.run;
+                }
+            } catch (e) { /* next tick */ }
+        }
+        renderWakePanel();
+        if (wakeOver()) { clearInterval(wakeTicker); wakeTicker = null; }
+    }
+
+    function closeWakePanel() {
+        document.getElementById('wakePanel').hidden = true;
+        if (wakeTicker) { clearInterval(wakeTicker); wakeTicker = null; }
+        wakeRun = null;
+    }
+
+    // ── Keep online (4.41.3) ─────────────────────────────────────
+    //
+    // ON until the admin turns it off (Riad). Each phone holds itself awake on
+    // a short lease that its 30 s poll renews, so a phone cut off from the
+    // server — or a server restart — lets it sleep again by itself. The panel
+    // shows, per phone, whether it is holding, and names any phone Android
+    // will not let stay awake (battery not "Unrestricted").
+    let koStatus = null, koLocalAt = 0, koTicker = null;
+
+    async function loadKeepOnline() {
+        try {
+            const res = await fetch('/api/keep-online', { headers: authHeaders() });
+            if (!res.ok) return;
+            koStatus = (await res.json()).status;
+            koLocalAt = Date.now();
+            renderKeepOnline();
+        } catch (e) { /* the button keeps its last state */ }
+    }
+
+    async function keepOnlineClick() {
+        if (koStatus && koStatus.on) {          // on: show who is holding (Turn off is in the panel)
+            if (wakeRun) closeWakePanel();
+            document.getElementById('koPanel').hidden = false;
+            renderKeepOnline();
+            return;
+        }
+        const t = commandTargetValue();
+        const who = t === 'all' ? 'all phones' : (t + '\'s phones');
+        if (!(await askConfirm(`Keep ${who} online?\n\nThey stay awake and check in every 30 seconds `
+                + 'until you turn this off. This uses more battery — keep busy phones on a charger.\n\n'
+                + 'Only phones whose GetOTP battery setting is "Unrestricted" can stay awake; '
+                + 'the panel names any that cannot.', { ok: 'Keep online' }))) return;
+        setKeepOnline(true);
+    }
+
+    async function setKeepOnline(on) {
+        const btn = document.getElementById('keepOnlineBtn');
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/keep-online', { method: 'POST', headers: authHeaders(),
+                body: JSON.stringify(on ? { on: true, target: commandTargetValue() } : { on: false }) });
+            if (res.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
+            if (!res.ok) { notify('⚠️ ' + await describeFailure(res)); return; }
+            koStatus = (await res.json()).status;
+            koLocalAt = Date.now();
+            if (on && wakeRun) closeWakePanel();
+            document.getElementById('koPanel').hidden = !on;
+            notify(on ? '🟢 Keeping phones online' : 'Keep online is off — phones sleep normally again');
+            renderKeepOnline();
+        } catch (e) {
+            notify('⚠️ Network error — nothing changed');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    function closeKoPanel() { document.getElementById('koPanel').hidden = true; }
+
+    function koElapsed() {
+        if (!koStatus || !koStatus.on) return '';
+        // Server times: since and serverTime come from the same clock.
+        const ms = (koStatus.serverTime - koStatus.since) + (Date.now() - koLocalAt);
+        const m = Math.max(0, Math.floor(ms / 60000));
+        return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+    }
+
+    function renderKeepOnline() {
+        const st = koStatus;
+        const btn = document.getElementById('keepOnlineBtn');
+        const on = !!(st && st.on);
+        btn.classList.toggle('on', on);
+        document.getElementById('keepOnlineLabel').textContent = on ? 'Online · ' + koElapsed() : 'Keep online';
+        btn.title = on ? 'Phones are being kept awake — click to see them or turn it off'
+                       : 'Keep the selected phones awake and online until you turn this off';
+        if (on && !koTicker) koTicker = setInterval(renderKeepOnline, 30_000);
+        if (!on && koTicker) { clearInterval(koTicker); koTicker = null; }
+        if (!on) { document.getElementById('koPanel').hidden = true; return; }
+
+        const list = st.devices || [];
+        const holding = list.filter(x => x.holding && x.exempt !== false).length;
+        document.getElementById('koSub').textContent =
+            (st.target ? st.target + '\'s phones' : 'all phones') + ` · ${holding} of ${list.length} awake · ${koElapsed()}`;
+        const el = document.getElementById('koList');
+        el.innerHTML = list.length ? list.map(x => {
+            let cls = '', dot = 'warn', text;
+            if (x.holding && x.exempt !== false) { cls = 'ok'; dot = 'ok'; text = '✓ staying awake and online'; }
+            else if (x.holding && x.exempt === false) {
+                cls = 'bad'; dot = 'bad';
+                text = '⚠ battery is not "Unrestricted" — Android will still put it to sleep';
+            } else if (appOlderThan(x.appVersion, '4.37.0')) {
+                cls = 'bad'; dot = 'bad';
+                text = `app ${x.appVersion || 'old'} — needs 4.37.0 to stay online`;
+            } else {
+                text = 'waiting for the phone… (it answers on its next check-in)';
+            }
+            const owner = x.owner ? ' · ' + x.owner : '';
+            return `<div class="wp-row ${cls}"><span class="s-dot ${dot}"></span><div>`
+                + `<div class="n">${esc(x.name)}<span class="wp-sub">${esc(owner)}</span></div>`
+                + `<div class="d">${esc(text)}</div></div></div>`;
+        }).join('') : (st.listed === false
+            ? '<div class="wp-row"><span class="s-dot"></span><div><div class="n">Phone list not available</div>'
+              + '<div class="d">This server runs with users switched off (USERS_ENABLED), so it keeps no phone list. '
+              + 'Keep online still reaches every phone.</div></div></div>'
+            : '<div class="wp-row"><span class="s-dot"></span><div><div class="n">No phones</div>'
+              + '<div class="d">No listed phone belongs to this target.</div></div></div>');
+        const hint = document.getElementById('koHint');
+        const blocked = list.some(x => x.exempt === false);
+        hint.hidden = !blocked;
+        if (blocked) hint.textContent = 'On each phone marked ⚠: Settings → Apps → GetOTP → Battery → "Unrestricted" '
+            + '(on Infinix / Tecno / Xiaomi also allow Auto-start). Until then Android ignores the request to stay awake.';
+    }
+
+    /** "4.36.0" < "4.37.0"? Unknown counts as older. */
+    function appOlderThan(v, want) {
+        const a = String(v || '0').split('.').map(n => parseInt(n, 10) || 0);
+        const b = want.split('.').map(n => parseInt(n, 10) || 0);
+        for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== b[i]) return (a[i] || 0) < b[i]; }
+        return false;
+    }
+
+    function renderWakePanel() {
+        const run = wakeRun;
+        if (!run) return;
+        const over = wakeOver();
+        const list = run.devices || [];
+        const answered = list.filter(x => x.answeredAt).length;
+        const left = Math.max(0, Math.ceil(((run.deadline - run.startedAt) - (Date.now() - wakeLocalStart)) / 1000));
+        document.getElementById('wpSub').textContent = list.length
+            ? `Test ${hhmm(run.startedAt)} · ${answered} of ${list.length} answered` + (over ? '' : ` · ${left}s`)
+            : `Test ${hhmm(run.startedAt)}`;
+        const el = document.getElementById('wpList');
+        if (!list.length) {
+            el.innerHTML = run.listed === false
+                ? '<div class="wp-row"><span class="s-dot"></span><div><div class="n">Phone list not available</div>'
+                  + '<div class="d">This server runs with users switched off (USERS_ENABLED), so it keeps no phone list. '
+                  + 'The Test still went to every phone — their test messages appear in the Inbox.</div></div></div>'
+                : '<div class="wp-row"><span class="s-dot"></span><div><div class="n">No phones to check</div>'
+                  + '<div class="d">No listed phone belongs to this target. Test messages still appear in the Inbox.</div></div></div>';
+        } else {
+            el.innerHTML = list.map(x => {
+                let cls = '', dot = '', text;
+                if (x.answeredAt) {
+                    cls = 'ok'; dot = 'ok';
+                    const secs = Math.max(0, Math.round((x.answeredAt - run.startedAt) / 1000));
+                    text = `✓ awake in ${secs}s — ` + (x.via === 'woke' ? 'woke up and synced' : 'test message arrived');
+                } else if (!over) {
+                    dot = 'warn';
+                    text = 'waiting…';
+                } else {
+                    cls = 'bad'; dot = 'bad';
+                    const recent = x.lastSeen && x.lastSeen >= run.startedAt - 120_000;
+                    text = recent ? '✗ no answer — it checked in, but did not run the Test in time (battery saver is probably holding the app back)'
+                                  : '✗ no answer — ' + (x.lastSeen ? 'last seen ' + sinceWhen(x.lastSeen) : 'never seen')
+                                    + ': phone off, no internet, or the app force-stopped';
+                    if (!globalForwarding && appOlderThan(x.appVersion, '4.37.0')) {
+                        text += ` (app ${x.appVersion || 'old'}: with forwarding OFF only 4.37.0+ can answer)`;
+                    }
+                }
+                const owner = me.role === 'admin' && x.owner ? ' · ' + x.owner : '';
+                return `<div class="wp-row ${cls}"><span class="s-dot ${dot}"></span><div>`
+                    + `<div class="n">${esc(x.name)}<span class="wp-sub">${esc(owner)}</span></div>`
+                    + `<div class="d">${esc(text)}</div></div></div>`;
+            }).join('');
+        }
+        const hint = document.getElementById('wpHint');
+        const missing = over && list.some(x => !x.answeredAt);
+        hint.hidden = !missing;
+        if (missing) hint.textContent = 'Not answering? Open GetOTP on that phone once — Android cannot wake an app '
+            + 'that was force-stopped. Then set its Battery to "Unrestricted", and on Infinix / Tecno / Xiaomi '
+            + 'allow Auto-start for GetOTP.';
     }
 
     // Distinct from Test: that asks the device to invent a message, this asks it
@@ -1732,10 +2123,108 @@
     // ═══════════════════════════════════════════════════════════
     //  CONFIG MODAL
     // ═══════════════════════════════════════════════════════════
+    // ── Unsaved filter edits (4.41.2) ─────────────────────────────
+    //
+    // cfgBase is what the SERVER holds; configFilters is what is on screen.
+    // Edits survive leaving the page (they are only in memory, never lost by a
+    // click on the rail) and a reload warns. A change saved elsewhere — another
+    // admin, or this admin in another tab — never silently replaces an edit in
+    // progress: the base moves, the edit stays, and the bar says so.
+    let cfgBase = { filters: '[]', autoDelete: 30 };
+    let cfgDraftAuto = null;          // the auto-delete box as typed, null = untouched
+    let cfgStale = false;             // the server's copy changed under an edit
+    let savingConfig = false;
+
+    // The two settings are tracked SEPARATELY (review, 4.41.3): an edit to one
+    // must never send — and so overwrite — the other's older value.
+    function filtersDirty() { return JSON.stringify(configFilters) !== cfgBase.filters; }
+    function autoDirty() {
+        return cfgDraftAuto !== null && String(parseInt(cfgDraftAuto, 10)) !== String(cfgBase.autoDelete);
+    }
+    function configDirty() { return filtersDirty() || autoDirty(); }
+
+    function setConfigBase() {
+        cfgBase = { filters: JSON.stringify(configFilters), autoDelete: autoDeleteMinutes };
+        cfgDraftAuto = null;
+        cfgStale = false;
+        updateConfigSaveBar();
+    }
+
+    /** A value from the server: full settings at sign-in, or a live update. */
+    function applyServerConfig(v) {
+        const open = document.getElementById('configOverlay').classList.contains('open');
+        if (v.filters !== undefined) {
+            const incoming = JSON.stringify(v.filters);
+            if (!filtersDirty()) {
+                // Nothing edited here: take it (also our own save echoing back,
+                // possibly normalised by the server).
+                configFilters = v.filters;
+                cfgBase.filters = incoming;
+            } else if (incoming !== cfgBase.filters) {
+                cfgBase.filters = incoming;
+                // Equal to the screen = our own save echoing back, not a conflict.
+                if (incoming !== JSON.stringify(configFilters)) cfgStale = true;
+            }
+            if (open) renderConfigFilters();
+        }
+        if (v.autoDeleteMinutes !== undefined) {
+            autoDeleteMinutes = v.autoDeleteMinutes;
+            cfgBase.autoDelete = v.autoDeleteMinutes;
+            if (cfgDraftAuto === null) {
+                // Untouched box: always show the server's value, so a Save can
+                // never send back an older number (review, 4.41.3).
+                if (open) document.getElementById('cfgAutoDelete').value = autoDeleteMinutes;
+            } else if (String(parseInt(cfgDraftAuto, 10)) === String(v.autoDeleteMinutes)) {
+                cfgDraftAuto = null;                        // the server now has what was typed
+            } else {
+                cfgStale = true;
+            }
+        }
+        if (!configDirty()) cfgStale = false;
+        updateConfigSaveBar();
+    }
+
+    function noteAutoDeleteDraft() {
+        cfgDraftAuto = document.getElementById('cfgAutoDelete').value;
+        updateConfigSaveBar();
+    }
+
+    function updateConfigSaveBar() {
+        const dirty = configDirty();
+        const bar = document.querySelector('.s-save');
+        if (bar) bar.classList.toggle('dirty', dirty);
+        const st = document.getElementById('cfgSaveState');
+        if (st) st.textContent = !dirty ? 'No unsaved changes'
+            : (cfgStale ? 'Unsaved changes — and these settings were changed elsewhere meanwhile. Save overwrites them; Discard loads them.'
+                        : 'Unsaved changes');
+        const save = document.getElementById('cfgSaveBtn');
+        if (save) save.disabled = !dirty || savingConfig;
+        const discard = document.getElementById('cfgDiscardBtn');
+        if (discard) discard.hidden = !dirty;
+        const dot = document.getElementById('navConfigDirty');
+        if (dot) dot.hidden = !dirty;
+    }
+
+    function discardConfig() {
+        configFilters = JSON.parse(cfgBase.filters);
+        autoDeleteMinutes = cfgBase.autoDelete;
+        clearConfigError();
+        setConfigBase();
+        document.getElementById('cfgAutoDelete').value = autoDeleteMinutes;
+        renderConfigFilters();
+    }
+
+    window.addEventListener('beforeunload', (e) => {
+        if (!configDirty()) return;
+        e.preventDefault();
+        e.returnValue = '';            // the browser shows its own "leave site?" prompt
+    });
+
     function openConfig() {
         clearConfigError();
         document.getElementById('configOverlay').classList.add('open');
-        document.getElementById('cfgAutoDelete').value = autoDeleteMinutes;
+        document.getElementById('cfgAutoDelete').value = cfgDraftAuto !== null ? cfgDraftAuto : autoDeleteMinutes;
+        updateConfigSaveBar();
         renderConfigFilters();
         renderFcmStatus();
         renderConfigStatus();
@@ -1751,10 +2240,17 @@
      * the server, and refreshFcmStatus silently skipped everything after it
      * (the load banner, the override button, the target list). Found in 4.41.1.
      */
+    /** The coloured dot beside a status heading: ok | warn | bad | '' (grey). */
+    function setDot(id, state) {
+        const el = document.getElementById(id);
+        if (el) el.className = 's-dot' + (state ? ' ' + state : '');
+    }
+
     function renderArchiveStatus() {
         const el = document.getElementById('archiveStatus');
         if (!el) return;
         const h = historyStats;
+        setDot('dotArchive', !h || !h.enabled ? '' : (h.dropped || h.lastError ? 'bad' : 'ok'));
         if (!h) { el.innerHTML = '<span class="fcm-idle">Not reported by this server.</span>'; return; }
         if (!h.enabled) {
             el.innerHTML = '<span class="fcm-idle">Off.</span> Set HISTORY_ENABLED=true (needs Firestore) '
@@ -1794,7 +2290,7 @@
             renderArchiveStatus();
             renderLoadBanner();
             renderOverrideButton();
-            if (me.role === 'admin') fillTargetDropdown();
+            if (me.role === 'admin') { fillTargetDropdown(); loadKeepOnline(); }
             renderStats();
         } catch (e) { /* the cached value stays on screen */ }
     }
@@ -1842,10 +2338,16 @@
         const el = document.getElementById('configStatus');
         // A user is no longer sent this — the storage and push diagnostics are
         // admin business now. Guard, rather than render "undefined".
-        if (!configStatus) { el.textContent = me.role === 'admin'
+        if (!configStatus) { setDot('dotConfig', ''); el.textContent = me.role === 'admin'
             ? 'unknown — reload the dashboard' : 'admin only'; return; }
         const rows = [];
         const src = configStatus.source || 'unknown';
+        {
+            const l = configStatus.load || {}, f = configStatus.firestore || {};
+            const failing = f.enabled && ((l.config && !l.config.ok) || (l.identity && !l.identity.ok));
+            setDot('dotConfig', failing || src === 'env defaults' ? 'bad'
+                : (!f.enabled || f.pendingWrite ? 'warn' : 'ok'));
+        }
         const load = configStatus.load || {};
         const fsOn = (configStatus.firestore || {}).enabled;
 
@@ -1909,8 +2411,9 @@
         const el = document.getElementById('fcmStatus');
         // A user is no longer sent this — the storage and push diagnostics are
         // admin business now. Guard, rather than render "undefined".
-        if (!fcmStatus) { el.textContent = me.role === 'admin'
+        if (!fcmStatus) { setDot('dotFcm', ''); el.textContent = me.role === 'admin'
             ? 'unknown — reload the dashboard' : 'admin only'; return; }
+        setDot('dotFcm', !fcmStatus.configured || (fcmStatus.lastAt && !fcmStatus.lastOk) ? 'bad' : 'ok');
 
         const rows = [];
         rows.push(fcmStatus.configured
@@ -1943,6 +2446,7 @@
     function closeConfig() { document.getElementById('configOverlay').classList.remove('open'); }
 
     function renderConfigFilters() {
+        updateConfigSaveBar();
         const defaultRule = configFilters.find(r => r.phoneNumber === 'DEFAULT') || { phoneNumber: 'DEFAULT', patterns: [] };
         const numberRules = configFilters.filter(r => r.phoneNumber !== 'DEFAULT');
         document.getElementById('defaultPatternsList').innerHTML = (defaultRule.patterns || []).map((p, i) =>
@@ -2046,40 +2550,60 @@
      * =======================================================================
      */
     async function saveConfig() {
+        if (savingConfig) return;
+        savingConfig = true;
+        updateConfigSaveBar();
         clearConfigError();
+        // What is SENT is recorded as sent. An edit made while the request is
+        // in flight stays an unsaved edit (review, 4.41.3: it used to be marked
+        // saved without ever reaching the server).
+        const sendFilters = filtersDirty() ? JSON.parse(JSON.stringify(configFilters)) : null;
+        const sendMins = autoDirty() ? Math.max(1, Math.min(1440, parseInt(cfgDraftAuto, 10) || 30)) : null;
         try {
-            const fRes = await fetch('/api/filters', {
-                method: 'POST', headers: authHeaders(),
-                body: JSON.stringify({ filters: configFilters })
-            });
-            if (fRes.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
-            if (!fRes.ok) {
-                showConfigError(await describeFailure(fRes));
-                notify('⚠️ Filters not saved');
-                return;
+            if (sendFilters) {
+                const fRes = await fetch('/api/filters', {
+                    method: 'POST', headers: authHeaders(),
+                    body: JSON.stringify({ filters: sendFilters })
+                });
+                if (fRes.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
+                if (!fRes.ok) {
+                    showConfigError(await describeFailure(fRes));
+                    notify('⚠️ Filters not saved');
+                    return;
+                }
+                cfgBase.filters = JSON.stringify(sendFilters);
             }
 
-            const mins = parseInt(document.getElementById('cfgAutoDelete').value, 10) || 30;
-            const aRes = await fetch('/api/auto-delete', {
-                method: 'POST', headers: authHeaders(),
-                body: JSON.stringify({ minutes: mins })
-            });
-            if (aRes.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
-            if (!aRes.ok) {
-                // Filters DID save. Say so, or the next attempt looks like a
-                // no-op and the real failure gets attributed to the patterns.
-                showConfigError('Filters saved. Auto-delete was not: '
-                    + (await describeFailure(aRes)));
-                notify('⚠️ Auto-delete not saved');
-                return;
+            if (sendMins !== null) {
+                const aRes = await fetch('/api/auto-delete', {
+                    method: 'POST', headers: authHeaders(),
+                    body: JSON.stringify({ minutes: sendMins })
+                });
+                if (aRes.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
+                if (!aRes.ok) {
+                    // Filters DID save (if they were sent). Say so, or the next
+                    // attempt looks like a no-op and the real failure gets
+                    // attributed to the patterns.
+                    showConfigError((sendFilters ? 'Filters saved. ' : '') + 'Auto-delete was not: '
+                        + (await describeFailure(aRes)));
+                    notify('⚠️ Auto-delete not saved');
+                    return;
+                }
+                autoDeleteMinutes = sendMins;
+                cfgBase.autoDelete = sendMins;
+                if (cfgDraftAuto !== null && String(parseInt(cfgDraftAuto, 10)) === String(sendMins)) cfgDraftAuto = null;
             }
 
-            autoDeleteMinutes = mins;
-            notify('💾 Settings saved');
-            closeConfig();
+            if (!configDirty()) cfgStale = false;
+            notify('💾 Saved');
+            // Stays on the page: it is a page now, and closing it after a save
+            // jumped back to the inbox.
         } catch (e) {
-            showConfigError('Could not reach the server — nothing was saved.');
+            showConfigError('Could not reach the server — nothing more was saved.');
             notify('⚠️ Save failed');
+        } finally {
+            savingConfig = false;
+            updateConfigSaveBar();
         }
     }
 
@@ -2292,7 +2816,11 @@
             for (const x of all) {
                 if (x.id === d.id || model(x) !== model(d) || !((x.createdAt || 0) > (d.createdAt || 0))) continue;
                 const shares = Array.from(mine).some(n => numbers(x).has(n));
-                const tookOver = (x.createdAt || 0) >= last - 30 * 60_000;
+                // The newer row appeared AROUND the time this one went quiet —
+                // not just any time after it (review, 4.41.3: a real phone of the
+                // same model, asleep overnight, was flagged once any newer
+                // same-model phone existed, and Remove would have revoked it).
+                const tookOver = Math.abs((x.createdAt || 0) - last) <= 2 * 3600_000;
                 if ((shares || tookOver) && (!best || x.createdAt > best.createdAt)) best = x;
             }
             if (best) out.set(d.id, best);
@@ -2303,12 +2831,12 @@
     async function removeOldCopies() {
         const list = window._oldCopies || [];
         if (!list.length) return;
-        if (!confirm('Remove these ' + list.length + ' old row(s)?\n\n'
+        if (!(await askConfirm('Remove these ' + list.length + ' old row(s)?\n\n'
             + list.map(x => '\u2022 ' + x.d.name + ' (' + x.d.id + ') \u2014 last contact '
                 + (x.d.lastActive ? sinceWhen(x.d.lastActive) : 'never')
                 + '\n   newer: ' + x.newer.name + ' (' + x.newer.id + ')').join('\n')
             + '\n\nOnly the old rows go. If one of them is in fact a separate phone that is just '
-            + 'switched off, it comes back only by reinstalling the app on it.')) return;
+            + 'switched off, it comes back only by reinstalling the app on it.', { ok: 'Remove', danger: true }))) return;
         let n = 0;
         for (const x of list) {
             try {
@@ -2592,7 +3120,7 @@
         el.innerHTML = (hosts.length
             ? hosts.map((h, i) => `<div class="admin-row"><span class="grow mono">${esc(h)}</span>`
                 + `<button data-act="removeHost" data-id="${i}">✕</button></div>`).join('')
-            : '<div class="mono">Not configured — phones accept any host. '
+            : '<div class="fcm-status">Not configured — phones accept any host. '
               + 'Their built-in server is always allowed either way.</div>');
         window._hosts = hosts;
     }
@@ -2622,9 +3150,9 @@
     async function pushServerUrl() {
         const url = document.getElementById('newServerUrl').value.trim();
         if (!url) return;
-        if (!confirm('Point EVERY phone at:\n\n' + url
+        if (!(await askConfirm('Point EVERY phone at:\n\n' + url
             + '\n\nThey will stop talking to the current server.\n'
-            + 'Make sure it is running first.')) return;
+            + 'Make sure it is running first.', { ok: 'Push to all phones', danger: true }))) return;
         const d = await adminPost('/api/set-url', { url, target: 'all' });
         if (d) {
             document.getElementById('newServerUrl').value = '';
@@ -2643,26 +3171,26 @@
         }
     }
 
-    function setUserActive(id, active) {
-        if (!active && !confirm('Deactivate ' + id + '?\n\n'
+    async function setUserActive(id, active) {
+        if (!active && !(await askConfirm('Deactivate ' + id + '?\n\n'
             + 'They lose every dashboard control immediately, even mid-session.\n'
             + 'THEIR PHONES STOP FORWARDING — messages arriving on them are not '
-            + 'delivered at all until you reactivate.')) return;
+            + 'delivered at all until you reactivate.', { ok: 'Deactivate', danger: true }))) return;
         adminPost('/api/users/' + encodeURIComponent(id) + '/active', { active },
             active ? id + ' reactivated' : id + ' deactivated — their phones now file to admin');
     }
 
     async function reissue(id) {
-        if (!confirm('Reset the password for ' + id + '?\n\n'
-            + 'Their current password stops working immediately.')) return;
+        if (!(await askConfirm('Reset the password for ' + id + '?\n\n'
+            + 'Their current password stops working immediately.', { ok: 'Reset password', danger: true }))) return;
         const d = await adminPost('/api/users/' + encodeURIComponent(id) + '/reissue');
         if (d) adminNotice('New enrollment code for ' + id + ': ' + d.enrollCode, false);
     }
 
-    function purgeUser(id) {
-        if (!confirm('PURGE ' + id + '?\n\nThis cannot be undone. Their devices become '
+    async function purgeUser(id) {
+        if (!(await askConfirm('PURGE ' + id + '?\n\nThis cannot be undone. Their devices become '
             + 'unassigned.\nTheir history is kept — a message records what happened '
-            + 'when it happened.\n\nDeactivate instead if you are not certain.')) return;
+            + 'when it happened.\n\nDeactivate instead if you are not certain.', { ok: 'Purge', danger: true }))) return;
         adminPost('/api/users/' + encodeURIComponent(id) + '/purge', {}, id + ' purged');
     }
 
@@ -2737,7 +3265,7 @@
         loadAdmin();
     }, 10000);
 
-    function removeDevice(id) {
+    async function removeDevice(id) {
         // The wording used to say it would "re-register the next time the app
         // starts" — which was true, and meant the button did nothing. It is a
         // standing block now, and the confirm has to say what it actually does.
@@ -2745,10 +3273,10 @@
         // "Allow back". Only reinstalling the app brings the phone back, and then
         // as a NEW, unassigned device. The confirm says exactly that, because a
         // mis-click now costs a reinstall on the phone.
-        if (!confirm('Remove this device?\n\nIt stops forwarding immediately and disappears '
+        if (!(await askConfirm('Remove this device?\n\nIt stops forwarding immediately and disappears '
             + 'from this list. It comes back ONLY if the app is reinstalled on that phone — '
             + 'and then as a new, unassigned device (owner, SIM number and username are not '
-            + 'kept).\n\nThere is no undo here.')) return;
+            + 'kept).\n\nThere is no undo here.', { ok: 'Remove device', danger: true }))) return;
         adminPost('/api/devices/' + encodeURIComponent(id) + '/remove', {}, 'Device removed');
     }
 
@@ -3060,8 +3588,8 @@
             .map(cb => cb.getAttribute('data-hid'));
         const ids = shown.filter(id => histSelected.has(id));
         if (!ids.length) return;
-        if (!confirm('Delete ' + ids.length + ' archived message'
-            + (ids.length === 1 ? '' : 's') + '?\n\nThis cannot be undone.')) return;
+        if (!(await askConfirm('Delete ' + ids.length + ' archived message'
+            + (ids.length === 1 ? '' : 's') + '?\n\nThis cannot be undone.', { ok: 'Delete', danger: true }))) return;
         try {
             const res = await fetch('/api/history/delete', { method: 'POST', headers: authHeaders(),
                 body: JSON.stringify({ ids }) });
@@ -3081,7 +3609,7 @@
         const what = days === 0
             ? 'Delete the ENTIRE archive?\n\n0 days means everything, including today.'
             : 'Delete every archived message older than ' + days + ' days?';
-        if (!confirm(what + '\n\nThis cannot be undone.')) return;
+        if (!(await askConfirm(what + '\n\nThis cannot be undone.', { ok: 'Delete', danger: true }))) return;
         try {
             const res = await fetch('/api/history/delete', { method: 'POST', headers: authHeaders(),
                 body: JSON.stringify({ olderThanDays: days }) });
@@ -3134,8 +3662,14 @@
         { subtree: true, attributes: true, attributeFilter: ['class'] });
 
     /** Open the page the address names, once signed in. Admin pages only for admin. */
+    // The page the address named when this tab opened. Read ONCE, before the
+    // login screen can rewrite the address: a bookmarked /#config used to land
+    // on the Inbox when a sign-in was needed first (review, 4.41.3).
+    let startPage = (location.hash || '').slice(1);
+
     function openFromAddress() {
-        const want = (location.hash || '').slice(1);
+        const want = startPage || (location.hash || '').slice(1);
+        startPage = '';
         const isAdmin = me.role === 'admin';
         const routes = { send: openSend,
                          admin: isAdmin ? openAdmin : null, users: isAdmin ? openUsers : null,
@@ -3409,8 +3943,9 @@
         const p = smsParts(message);
         // Real SMS cost real money from someone's SIM balance: say exactly what
         // is about to happen, once.
-        if (!confirm(`Send ${sendRecipients.length * Math.max(1, p.parts)} SMS to ${sendRecipients.length} `
-                + `number(s) from ${from.number} (${from.ownerName} · ${from.deviceName} · SIM ${from.slot})?`)) return;
+        if (!(await askConfirm(`Send ${sendRecipients.length * Math.max(1, p.parts)} SMS?\n\n`
+                + `To ${sendRecipients.length} number(s), from ${from.number} (${from.ownerName} · ${from.deviceName} · SIM ${from.slot}).\n\n`
+                + `“${message.trim().slice(0, 120)}${message.trim().length > 120 ? '…' : ''}”`, { ok: 'Send' }))) return;
         sending = true;
         const btn = document.getElementById('sendBtn');
         btn.disabled = true; btn.textContent = 'Sending…';
@@ -3470,7 +4005,10 @@
     function renderOutbox() {
         const el = document.getElementById('outboxList');
         if (!el) return;
-        const jobs = Object.values(outboxJobs).sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1)).slice(0, 100);
+        const all = Object.values(outboxJobs);
+        const clearBtn = document.getElementById('obClearBtn');
+        if (clearBtn) clearBtn.hidden = !all.some(j => OB_CLEARABLE.has(j.status) && (me.role === 'admin' || j.createdBy === me.userId));
+        const jobs = all.sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1)).slice(0, 100);
         if (!jobs.length) { el.innerHTML = '<div class="a-empty">Nothing sent yet.</div>'; return; }
         el.innerHTML = jobs.map(j => {
             const st = j.status;
@@ -3482,17 +4020,84 @@
             if (st === 'delivered') meta += j.receivedAt ? ' · arrived on your other phone' : (j.deliveredAt ? ' · delivered ' + hhmm(j.deliveredAt) : '');
             if (j.createdByName && me.role === 'admin' && j.createdBy !== 'admin') meta += ' · by ' + esc(j.createdByName);
             if (me.role !== 'admin' && j.createdBy !== me.userId) meta += ' · sent from your SIM by ' + esc(j.createdByName || j.createdBy);
-            const err = (st === 'failed' || st === 'undelivered' || st === 'unknown' || st === 'expired') && j.error
-                ? `<span class="meta err">${esc(j.error)}</span>` : '';
-            const cancel = st === 'queued' && (me.role === 'admin' || j.createdBy === me.userId)
+            const mine = me.role === 'admin' || j.createdBy === me.userId;
+            const final = OB_RETRYABLE.has(st);
+            if (j.retryOf) meta += ' · retry';
+            if (j.retriedBy) meta += ' · retried';
+            // Words from the server (lib/smserrors.js); the raw code stays in the tooltip.
+            const err = final && j.error
+                ? `<span class="meta err" title="${esc(j.error)}">${esc(j.errorText || j.error)}</span>` : '';
+            const cancel = st === 'queued' && mine
                 ? `<button class="a-btn" data-cancel-job="${esc(j.id)}">Cancel</button>` : '';
+            const retry = final && mine && !j.retriedBy
+                ? `<button class="a-btn" data-retry-job="${esc(j.id)}">Retry</button>` : '';
+            const del = OB_CLEARABLE.has(st) && mine
+                ? `<button class="del" data-delete-job="${esc(j.id)}" title="Delete" aria-label="Delete">✕</button>` : '';
             return `<div class="ob">
                 <div class="h"><span class="to">${esc(j.to)}</span><span class="lbl">${esc(j.toLabel || '')}</span>
-                    <span class="st st-${esc(st)}">${esc(OB_WORDS[st] || st)}</span></div>
+                    <span class="st st-${esc(st)}">${esc(OB_WORDS[st] || st)}</span>${del}</div>
                 <span class="m">${esc(j.message)}</span>
-                <span class="meta">${meta}</span>${err}${cancel}
+                <span class="meta">${meta}</span>${err}${cancel}${retry}
             </div>`;
         }).join('');
+    }
+
+    // Must match outbox.RETRYABLE / outbox.CLEARABLE on the server.
+    const OB_RETRYABLE = new Set(['failed', 'undelivered', 'expired', 'unknown']);
+    const OB_CLEARABLE = new Set(['delivered', 'failed', 'undelivered', 'cancelled', 'expired', 'unknown', 'sent']);
+
+    /**
+     * Delete finished SMS for good (4.41.3, Riad: "delete permanently"). The
+     * server erases text and number at once; only an anonymous count stays
+     * until midnight so the daily limit cannot be reset by clearing.
+     */
+    async function clearOutbox(jobId) {
+        const mine = j => me.role === 'admin' || j.createdBy === me.userId;
+        const n = jobId ? 1 : Object.values(outboxJobs).filter(j => OB_CLEARABLE.has(j.status) && mine(j)).length;
+        if (!n) return;
+        const what = jobId ? 'Delete this SMS?' : `Delete ${n} finished SMS?`;
+        if (!(await askConfirm(what + '\n\nRemoved from the outbox and from the server for good. '
+                + 'SMS still queued or sending are kept. Today\'s daily limit is not reset.',
+                { ok: 'Delete', danger: true }))) return;
+        try {
+            const res = await fetch('/api/send/clear', { method: 'POST', headers: authHeaders(),
+                body: JSON.stringify(jobId ? { jobIds: [jobId] } : { all: true }) });
+            if (res.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
+            if (!res.ok) { notify('⚠️ ' + await describeFailure(res)); return; }
+            const d = await res.json();
+            notify(d.cleared ? `🗑️ Deleted ${d.cleared} SMS` : 'Nothing to delete');
+            loadOutbox(true);
+            loadSendOptions();
+        } catch (e) { notify('⚠️ Network error — nothing was deleted'); }
+    }
+    let retrying = false;
+
+    /** A NEW SMS with the same SIM, number and text. The server allows one retry per SMS. */
+    async function retryJob(jobId) {
+        const j = outboxJobs[jobId];
+        if (!j || retrying) return;
+        const warn = j.status === 'unknown'
+            ? '\n\nCareful: the phone never reported on this one, so it MAY already have gone out. '
+              + 'Check the phone\'s Sent messages first.'
+            : (j.status === 'undelivered'
+                ? '\n\nThe first one left the phone but was not delivered — retrying usually only helps once the recipient\'s phone is on.'
+                : '');
+        if (!(await askConfirm(`Send this SMS again?\n\nFrom ${j.fromNumber} to ${j.to}.${warn}`, { ok: 'Send again' }))) return;
+        retrying = true;
+        try {
+            const res = await fetch('/api/send/retry', { method: 'POST', headers: authHeaders(),
+                body: JSON.stringify({ jobId }) });
+            if (res.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
+            if (!res.ok) { const why = await describeFailure(res); sendNotice(why); notify('⚠️ ' + why); return; }
+            const d = await res.json();
+            for (const x of d.jobs || []) outboxJobs[x.id] = x;
+            notify('Queued again');
+            loadOutbox(true);
+        } catch (e) {
+            notify('⚠️ Network error — nothing was sent');
+        } finally {
+            retrying = false;
+        }
     }
 
     async function cancelJob(jobId) {
@@ -3537,11 +4142,81 @@
             return;
         }
         const c = e.target.closest('[data-cancel-job]');
-        if (c) cancelJob(c.getAttribute('data-cancel-job'));
+        if (c) { cancelJob(c.getAttribute('data-cancel-job')); return; }
+        const rt = e.target.closest('[data-retry-job]');
+        if (rt) { retryJob(rt.getAttribute('data-retry-job')); return; }
+        const dj = e.target.closest('[data-delete-job]');
+        if (dj) clearOutbox(dj.getAttribute('data-delete-job'));
     });
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && e.target && e.target.id === 'sendTyped') { e.preventDefault(); addTypedRecipients(); }
     });
+
+    /**
+     * The confirm box, centred on the page (4.41.3). The browser's own confirm()
+     * is drawn by Chrome at the top of the window and cannot be moved or styled.
+     *
+     * The first paragraph is the question (bold), the rest the detail. Text
+     * only — every string goes in through textContent, never as markup.
+     * Esc, the backdrop and Cancel all answer "no". For a destructive action
+     * Cancel has the focus, so a stray Enter never confirms it.
+     *
+     * @returns {Promise<boolean>}
+     */
+    let confirmResolve = null, confirmReturnFocus = null;
+    function askConfirm(message, opts) {
+        opts = opts || {};
+        if (confirmResolve) { confirmResolve(false); confirmResolve = null; }
+        let box = document.getElementById('confirmBox');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'confirmBox';
+            box.className = 'cbox-backdrop';
+            box.innerHTML = '<div class="cbox" role="alertdialog" aria-modal="true" aria-labelledby="cboxTitle" aria-describedby="cboxBody">'
+                + '<div class="cbox-title" id="cboxTitle"></div><div class="cbox-body" id="cboxBody"></div>'
+                + '<div class="cbox-actions"><button type="button" class="a-btn" id="cboxCancel">Cancel</button>'
+                + '<button type="button" class="cbox-ok" id="cboxOk">OK</button></div></div>';
+            document.body.appendChild(box);
+            const answer = (v) => {
+                box.classList.remove('open');
+                const r = confirmResolve; confirmResolve = null;
+                // Focus goes back to whatever opened the box (review, 4.41.3).
+                const back = confirmReturnFocus; confirmReturnFocus = null;
+                try { if (back && document.contains(back)) back.focus(); } catch (e) { }
+                if (r) r(v);
+            };
+            box.addEventListener('click', (e) => { if (e.target === box) answer(false); });
+            document.getElementById('cboxCancel').addEventListener('click', () => answer(false));
+            document.getElementById('cboxOk').addEventListener('click', () => answer(true));
+            // On the DOCUMENT, capture phase: Escape and Tab work wherever the
+            // focus is — even after a click on the box's text took it off the
+            // buttons (review, 4.41.3) — and never reach the page underneath.
+            document.addEventListener('keydown', (e) => {
+                if (!box.classList.contains('open')) return;
+                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); answer(false); return; }
+                if (e.key === 'Tab') {               // keep focus inside the box
+                    const a = document.getElementById('cboxCancel'), b = document.getElementById('cboxOk');
+                    const f = document.activeElement;
+                    if (f !== a && f !== b) { e.preventDefault(); a.focus(); }
+                    else if (e.shiftKey && f === a) { e.preventDefault(); b.focus(); }
+                    else if (!e.shiftKey && f === b) { e.preventDefault(); a.focus(); }
+                }
+            }, true);
+        }
+        const text = String(message == null ? '' : message);
+        const cut = text.indexOf('\n\n');
+        document.getElementById('cboxTitle').textContent = cut < 0 ? text : text.slice(0, cut);
+        const body = document.getElementById('cboxBody');
+        body.textContent = cut < 0 ? '' : text.slice(cut + 2);
+        body.hidden = cut < 0;
+        if (!confirmReturnFocus) confirmReturnFocus = document.activeElement;
+        const ok = document.getElementById('cboxOk');
+        ok.textContent = opts.ok || 'OK';
+        ok.classList.toggle('danger', !!opts.danger);
+        box.classList.add('open');
+        (opts.danger ? document.getElementById('cboxCancel') : ok).focus();
+        return new Promise(resolve => { confirmResolve = resolve; });
+    }
 
     function notify(msg) {
         const el = document.getElementById('notification');
