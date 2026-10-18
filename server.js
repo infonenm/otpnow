@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.41.3
+ * server.js — GetOTP Render Server v4.42.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -38,9 +38,10 @@
  *   POST /api/register    → Device announces itself + its SIMs (API key)
  *   GET  /api/send/options, POST /api/send, GET /api/send/jobs, POST /api/send/cancel,
  *   POST /api/send/retry, POST /api/send/clear
+ *                         → Send real SMS from a phone's SIM (token auth, scoped by role)
  *   POST /api/test → also wakes the phones; GET /api/test/status → who answered
  *   POST /api/keep-online, GET /api/keep-online → phones stay awake until turned off (admin)
- *                         → Send real SMS from a phone's SIM (token auth, scoped by role)
+ *   GET  /api/alerts → the admin's recent push alerts (OTP Master)
  *   GET  /api/send/pull, POST /api/send/report → the phone's side of sending (API key)
  *   GET  /health          → Keepalive
  *   GET  /                → Dashboard
@@ -57,6 +58,10 @@ const history   = require('./lib/history');
 const outbox    = require('./lib/outbox');
 const wake      = require('./lib/wake');
 const keepOnline = require('./lib/keeponline');
+const alerts     = require('./lib/alerts');
+const move       = require('./lib/move');
+/** Random per process: lets a move refuse a target that is this same server. */
+const SERVER_ID  = crypto.randomBytes(8).toString('hex');
 
 // Initialize FCM (silent no-op if FIREBASE_SERVICE_ACCOUNT not set)
 fcm.init();
@@ -74,6 +79,9 @@ history.start();
 outbox.start();
 wake.setBroadcast(store.broadcast);
 keepOnline.setBroadcast(store.broadcast);
+// Push alerts to the admin's phone (OTP Master, 4.42.0).
+outbox.setFailureHook(alerts.smsFailed);
+alerts.start();
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -428,6 +436,12 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // no Play Services, so a command that only rode FCM would silently not
         // work on exactly the devices most likely to have missed the SMS.
         fetchLatestTs:    cmds.fetchLatestTs,
+        // "Push to all phones" is carried by this poll (4.42.0): an app that
+        // sees this treats a set_url push only as a signal to poll — so a move
+        // stopped or replaced here is never applied from a late push.
+        moveCarrier:      true,
+        // This server instance, so a move can refuse "moving" to itself.
+        serverId:         SERVER_ID,
         // The server's clock, so the app can tell how OLD each one-shot above
         // is without trusting its own clock. FCM drops a one-shot after two
         // minutes; the poll carrier had no such limit, so a phone that had been
@@ -446,6 +460,10 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         ...(pushName ? { pushUsername: pushName } : {}),
         // SMS queued for THIS phone that it may pull now (4.41.0). The carrier
         // for a phone FCM cannot reach; omitted when there is nothing to send.
+        // A pending "Push to all phones" (4.42.0): repeated on every poll until
+        // the phone has moved (app 4.38.0 applies it once per ts).
+        ...(move.forDevice(req.query.deviceId, id => store.users.ownerOf(id))
+              ? { moveTo: move.forDevice(req.query.deviceId, id => store.users.ownerOf(id)) } : {}),
         ...(store.usersEnabled() && outbox.dueCount(req.query.deviceId) > 0
               ? { sendDue: outbox.dueCount(req.query.deviceId) } : {}),
         // OMITTED when unconfigured, rather than sent as [].
@@ -770,6 +788,12 @@ app.get('/api/keep-online', requireAdmin, (req, res) => {
     res.json({ status: keepOnline.status() });
 });
 
+// The admin's recent push alerts (OTP Master, 4.42.0): what was sent, newest
+// last — the in-app list for an admin who muted the notifications.
+app.get('/api/alerts', requireAdmin, (req, res) => {
+    res.json({ alerts: alerts.recent(), topics: alerts.TOPICS });
+});
+
 // The caller's newest Test: which phones answered (woke, or sent the test message).
 app.get('/api/test/status', requireToken, (req, res) => {
     res.json({ run: wake.status(req.session) });
@@ -1026,7 +1050,10 @@ app.post('/api/set-url', usersGate, requireAdmin, (req, res) => {
     }
     const host = raw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase();
     const allowed = store.users.getAllowedHosts();
-    if (allowed.length && !allowed.includes(host)) {
+    // 4.42.0: REQUIRED, not "if configured". The check below sends this
+    // server's API key and admin password to the new host; a typo must never
+    // send them to a stranger's address — only to a host you listed.
+    if (!allowed.includes(host)) {
         return res.status(400).json({
             error: `"${host}" is not on the allowed hosts list, so every phone would `
                  + `refuse it. Add it under Allowed server hosts first.`
@@ -1042,14 +1069,38 @@ app.post('/api/set-url', usersGate, requireAdmin, (req, res) => {
             return res.status(400).json({ error: 'Unknown target user. Omit it, or use "all".' });
         }
     }
-    fcm.send('set_url', Date.now(), who ? 'user_' + who : undefined, { url: raw });
-    console.warn(`[server] set_url pushed: ${raw} -> ${who || 'all devices'}`);
-    res.json({
-        success: true, url: raw, target: who || 'all',
-        // Honest about what was actually achieved: FCM accepted a message.
-        note: 'Pushed. Phones without Play Services, or force-stopped, will not '
-            + 'receive this — change those by hand in the app.'
-    });
+    // 4.42.0: check the new server FIRST (reachable, same API key), then keep
+    // the move pending here so every phone gets it on its next poll too — see
+    // lib/move.js. Async: the check can take a while on a sleeping instance.
+    // One at a time: a slow check finishing after a newer move must not undo it.
+    if (moveInFlight) return res.status(409).json({ error: 'Another move is being checked — wait for it to finish.' });
+    moveInFlight = true;
+    (async () => {
+        const pre = await move.preflight(raw, process.env.API_KEY, process.env.DASHBOARD_PASSWORD,
+                                         undefined, undefined, SERVER_ID);
+        if (!pre.ok) return res.status(400).json({ error: pre.error });
+        const ts = Date.now();
+        move.set(raw, ts, who, (req.session && req.session.userId) || 'admin');
+        fcm.send('set_url', ts, who ? 'user_' + who : undefined, { url: raw });
+        store.broadcast('settings_change', { key: 'serverMove', value: move.status() }, { adminOnly: true });
+        console.warn(`[server] set_url pushed: ${raw} -> ${who || 'all devices'} (pending on the poll too)`);
+        res.json({
+            success: true, url: raw, target: who || 'all', move: move.status(), warnings: pre.warnings,
+            note: 'Moving. Phones move now by push, and any that miss it move on their next '
+                + 'check-in with this server (app 4.38.0+). Keep this server running until they have.'
+                + (pre.warnings.length ? ' ' + pre.warnings.join(' ') : '')
+        });
+    })().catch(e => { console.error('[server] set-url:', e); if (!res.headersSent) res.status(500).json({ error: 'Move failed: ' + e.message }); })
+        .finally(() => { moveInFlight = false; });
+});
+let moveInFlight = false;
+
+// Stop a pending move: phones not yet moved stay here. Phones that moved stay
+// moved — push this server's address from the new one to bring them back.
+app.post('/api/set-url/cancel', usersGate, requireAdmin, (req, res) => {
+    const was = move.clear();
+    store.broadcast('settings_change', { key: 'serverMove', value: null }, { adminOnly: true });
+    res.json({ success: true, cancelled: !!was });
 });
 
 // Force a re-read of config and identity from Firestore.
@@ -1381,6 +1432,8 @@ app.get('/api/full-settings', requireToken, (req, res) => {
         config:  isAdmin ? store.configStatus() : null,
         history: isAdmin ? history.stats() : null,
         outbox:  isAdmin ? outbox.stats() : null,
+        // A "Push to all phones" still being delivered (4.42.0), or null.
+        serverMove: isAdmin ? move.status() : null,
         identity: !store.usersEnabled() ? null : (isAdmin
             ? Object.assign(store.users.stats(), { overrides: store.listOverrides(),
                                                    overrideCeiling: store.overrideCeilingMinutes() })
@@ -1530,6 +1583,12 @@ async function shutdown(signal) {
         if (st.lastWriteOk === false) break;
         await new Promise(r => setTimeout(r, 50));
     } while (Date.now() < writesDeadline);
+    // SMS-failure alerts waiting in their 30 s batch: their jobs are already
+    // marked alerted (and saved so below), so a batch lost here is lost for
+    // good. Send it first, bounded (review, 4.42.0).
+    try {
+        await Promise.race([alerts.flushSms(), new Promise(r => setTimeout(r, 2000))]);
+    } catch (e) { /* fcm.send logs */ }
     // The outbox queue: a job created just before a deploy must survive it.
     try { await outbox.flush(); } catch (e) { /* logged inside */ }
     try {

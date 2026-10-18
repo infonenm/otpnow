@@ -166,7 +166,13 @@ const register = (deviceId, sims) => req('POST', '/api/register', { apiKey: KEY,
     outbox._jobs.get(j1.id).dispatchedAt = tomorrow - 60_000;
     outbox.sweep(tomorrow);
     assert.ok(outbox._jobs.has(j1.id), 'kept while the phone\'s pacing window still counts it');
-    outbox._jobs.get(j1.id).dispatchedAt = now;
+    // Out of the pacing window — set relative to `tomorrow`, not to the wall
+    // clock: dispatchedAt = now failed every night from 23:31 Dhaka, when "now"
+    // is still inside the window at the next midnight (review, 4.42.0).
+    for (const id of [j1.id, j2.id]) {
+        const j = outbox._jobs.get(id);
+        if (j && j.dispatchedAt) j.dispatchedAt = tomorrow - outbox.DEVICE_WINDOW_MS - 60_000;
+    }
     outbox.sweep(tomorrow);
     assert.ok(!outbox._jobs.has(j1.id) && !outbox._jobs.has(j2.id), 'yesterday\'s records leave memory');
     await outbox.flush();
