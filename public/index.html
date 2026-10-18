@@ -228,6 +228,12 @@
     .nav-badge{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:600;
         color:var(--on-cyan);background:var(--cyan);border-radius:10px;padding:1px 8px}
     .nav-badge.zero{background:var(--bg-hover);color:var(--text-3)}
+    .nav-sep{height:1px;background:var(--border);margin:14px 6px}
+    .nav-item.small{min-height:40px;font-size:14px;color:var(--text-3)}
+    .nav-item.small:hover{color:var(--text-1)}
+    .nav-item.danger:hover{color:var(--red-soft);background:var(--red-dim)}
+    .nav-badge.warn{background:var(--orange);color:#1A0F02}
+    .nav-badge[hidden]{display:none}
     .nav-card{
         margin-top:18px;padding:14px;border-radius:var(--radius);border:1px solid var(--border);
         background:var(--bg-sunk);display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--text-2);
@@ -294,25 +300,22 @@
     .empty-state-icon{width:44px;height:44px;border-radius:14px;border:1px dashed var(--border-h);display:flex;align-items:center;justify-content:center;font-size:0}
     .empty-state-icon::before{content:'';width:16px;height:12px;border:2px solid var(--text-4);border-radius:3px}
 
-    /* ── Side panels (the old modals) ───────────────────────── */
-    .config-overlay{
-        display:none;position:fixed;inset:0;background:rgba(4,6,12,0.68);backdrop-filter:blur(3px);
-        z-index:900;justify-content:flex-end;
-    }
-    .config-overlay.open{display:flex}
-    .config-modal{
-        width:min(760px,100%);height:100%;overflow-y:auto;background:var(--bg-panel);
-        border-left:1px solid var(--border-h);padding:26px clamp(16px,3vw,32px) 40px;box-shadow:var(--shadow);
-        animation:slidein .22s ease-out;
-    }
-    .config-modal.wide{width:min(1120px,100%)}
-    @keyframes slidein{from{transform:translateX(24px);opacity:.4}to{transform:none;opacity:1}}
+    /* ── Pages ──────────────────────────────────────────────────
+       Every section is a PAGE in the main area (Riad, 4.41.1), opened from the
+       rail. They were side panels; the ids, the open/close functions and the
+       "open" class are the same, only where they draw changed. Only the full
+       message view stays a popup — it is a detail over History, not a place. */
+    .config-overlay{display:none}
+    .config-overlay.open{display:block;animation:fadein .18s ease-out}
+    @keyframes fadein{from{opacity:.3;transform:translateY(6px)}to{opacity:1;transform:none}}
+    .config-modal{width:100%}
     .config-modal h3{
-        position:sticky;top:-26px;z-index:2;margin:-26px calc(-1 * clamp(16px,3vw,32px)) 20px;
-        padding:20px clamp(16px,3vw,32px);background:rgba(14,18,34,0.96);backdrop-filter:blur(8px);
-        border-bottom:1px solid var(--border);
-        display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:22px;font-weight:700;letter-spacing:-0.01em;
+        display:flex;align-items:center;justify-content:space-between;gap:12px;
+        font-size:28px;font-weight:700;letter-spacing:-0.01em;margin-bottom:22px;
     }
+    /* No ✕ on a page — the rail is how you leave. Kept in the markup for the
+       script's sake, hidden here. */
+    .config-overlay .config-close{display:none}
     .config-close{
         width:40px;height:40px;flex:none;background:var(--bg-sunk);border:1px solid var(--border-h);border-radius:12px;
         color:var(--text-2);font-size:18px;cursor:pointer;line-height:1;
@@ -390,9 +393,20 @@
     .a-card.is-warn .a-avatar{background:var(--orange-dim);border-color:var(--orange-line);color:var(--orange-soft)}
     .a-card.is-off .a-avatar{background:var(--red-dim);border-color:var(--red-line);color:var(--red-soft)}
     .a-ident{flex:1;min-width:0}
-    .a-name{font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .a-sub{font-family:var(--mono);font-size:11.5px;color:var(--text-3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .a-tags{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex:none;max-width:55%}
+    /* FULL names (Riad, 4.41.1): a phone is told apart from its twin by the
+       very characters an ellipsis hides. They wrap instead. */
+    .a-name{font-size:16px;font-weight:700;overflow-wrap:anywhere;line-height:1.3}
+    .a-sub{font-family:var(--mono);font-size:11.5px;color:var(--text-3);margin-top:3px;overflow-wrap:anywhere;line-height:1.5}
+    .a-head{align-items:flex-start}
+    .a-tags{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex:0 1 auto;max-width:45%}
+    .a-card.is-dup{border-style:dashed;border-color:var(--orange-line);opacity:.85}
+    .dup-banner{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:0 0 18px;padding:14px 16px;border-radius:14px;
+        background:var(--orange-dim);border:1px solid var(--orange-line);color:var(--orange-soft);font-size:14px;line-height:1.5}
+    .dup-banner[hidden]{display:none}
+    .dup-banner .grow{flex:1 1 320px}
+    .dup-banner button{height:40px;padding:0 16px;border-radius:12px;border:1px solid var(--orange);background:var(--orange);
+        color:#1A0F02;font-weight:700;cursor:pointer}
+    .dev-group{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--text-3);margin:8px 0 0;grid-column:1 / -1}
     .a-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border)}
     .a-foot .spacer{flex:1}
     .a-btn{height:36px;padding:0 12px;font-size:13px;font-weight:600;border-radius:10px;background:var(--bg-panel);
@@ -488,8 +502,8 @@
     .sender:hover:not(:disabled){border-color:var(--border-h)}
     .sender.on{border-color:var(--cyan);background:var(--cyan-dim)}
     .sender:disabled{cursor:not-allowed;opacity:.55}
-    .sender .t{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;width:100%}
-    .sender .t i{margin-left:auto;width:8px;height:8px;border-radius:4px;background:var(--cyan);flex:none}
+    .sender .t{display:flex;align-items:flex-start;gap:8px;font-weight:600;font-size:14px;width:100%;overflow-wrap:anywhere}
+    .sender .t i{margin-left:auto;margin-top:6px;width:8px;height:8px;border-radius:4px;background:var(--cyan);flex:none}
     .sender .t i.off{background:#4A5070} .sender .t i.warn{background:var(--orange)}
     .sender .n{font-family:var(--mono);font-size:15px}
     .sender .r{font-size:12px;color:var(--text-3)}
@@ -562,8 +576,7 @@
        close-then-open. Below this width the panel takes the screen and ✕ or
        Escape returns to it. */
     @media (min-width:1100px){
-        .side-nav{position:sticky;top:0;align-self:flex-start;min-height:calc(100vh - 66px);z-index:950;background:var(--bg)}
-        .config-modal{max-width:calc(100% - 240px)}
+        .side-nav{position:sticky;top:66px;align-self:flex-start;min-height:calc(100vh - 66px)}
     }
 
     /* ── Narrow screens ─────────────────────────────────────── */
@@ -577,6 +590,8 @@
         .side-nav{max-width:none;flex-basis:100%;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--border);padding:10px 12px}
         .nav-item{width:auto;flex:1 1 auto}
         .nav-card{display:none}
+        .nav-sep{display:none}
+        .nav-item.small{flex:0 1 auto}
         .main{padding:18px 16px 40px}
         .whoami{display:none}
         .load-banner{margin:12px 16px 0}
@@ -637,17 +652,7 @@
             <button class="primary-btn" id="sendOpenBtn" onclick="openSend()" title="Send a real SMS from one of your phones">
                 <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8l11-5-4 11-2-4.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path></svg>Send SMS</button>
 
-            <div class="menu-wrap">
-                <button class="tb-btn menu-btn" id="menuBtn" type="button" title="Menu" aria-label="Menu" aria-expanded="false" aria-haspopup="true">
-                    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="4" cy="9" r="1.6" fill="currentColor"></circle><circle cx="9" cy="9" r="1.6" fill="currentColor"></circle><circle cx="14" cy="9" r="1.6" fill="currentColor"></circle></svg></button>
-                <div id="barMenu" class="menu">
-                    <button class="menu-item" id="clearLogBtn" onclick="closeMenu();clearForwardLog()">Clear phone log</button>
-                    <div class="menu-sep"></div>
-                    <!-- Destructive, and last, and the only red thing in here. -->
-                    <button class="menu-item menu-danger" onclick="closeMenu();clearAllMessages()">Clear all messages</button>
-                    <button class="menu-item" onclick="closeMenu();doLogout()">Sign out</button>
-                </div>
-            </div>
+            <div id="barMenu" class="menu" hidden></div>
         </header>
         <!-- Impossible to miss. A failed Firestore load used to be visible only
              inside the Settings modal, so it looked exactly like the data had
@@ -664,13 +669,27 @@
                     Send SMS</button>
                 <button class="nav-item admin-only" data-nav="admin" onclick="closeAllPanels();openAdmin()">
                     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><rect x="5" y="2" width="8" height="14" rx="2"></rect><path d="M8 13.5h2"></path></svg>
-                    Devices &amp; Users</button>
+                    Devices<span class="nav-badge warn" id="navDevicesWarn" hidden>!</span></button>
+                <button class="nav-item admin-only" data-nav="users" onclick="closeAllPanels();openUsers()">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><circle cx="9" cy="6.5" r="3"></circle><path d="M3.5 15.5c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5" stroke-linecap="round"></path></svg>
+                    Users</button>
                 <button class="nav-item admin-only" data-nav="history" onclick="closeAllPanels();openHistory()">
                     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><circle cx="9" cy="9" r="6.5"></circle><path d="M9 5.5V9l2.5 1.6" stroke-linecap="round"></path></svg>
                     History</button>
-                <button class="nav-item admin-only" data-nav="config" onclick="closeAllPanels();openConfig()">
+                <button class="nav-item admin-only" data-nav="config" onclick="closeAllPanels();openConfig();loadAdmin()">
                     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M3 5h12M3 9h12M3 13h12" stroke-linecap="round"></path></svg>
                     Filters &amp; Settings</button>
+                <!-- What used to hide behind the ⋯ menu, in plain sight (Riad, 4.41.1). -->
+                <div class="nav-sep"></div>
+                <button class="nav-item small" id="clearLogBtn" onclick="clearForwardLog()" title="Clears the forwarding log on the phones (the target in the top bar applies)">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M4 4.5h10M7 4.5V3h4v1.5M5.5 4.5l.7 10h5.6l.7-10" stroke-linejoin="round"></path></svg>
+                    Clear phone log</button>
+                <button class="nav-item small danger" onclick="clearAllMessages()" title="Deletes every message on the dashboard">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M4 4l10 10M14 4L4 14" stroke-linecap="round"></path></svg>
+                    Clear all messages</button>
+                <button class="nav-item small" onclick="doLogout()">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M7 3.5H4.5v11H7M11 6l3 3-3 3M14 9H7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                    Sign out</button>
                 <div class="nav-card admin-only">
                     <span class="eyebrow">SYSTEM</span>
                     <span id="navSystem">Checking…</span>
@@ -678,6 +697,7 @@
             </nav>
 
             <main class="main">
+              <div id="inboxPage" class="page">
                 <div class="page-head">
                     <div>
                         <h1>Inbox</h1>
@@ -717,162 +737,176 @@
                         </div>
                     </div>
                 </div>
+              </div>
+
+                <!-- FILTERS & SETTINGS -->
+                <div id="configOverlay" class="config-overlay">
+                    <div class="config-modal" role="region" aria-label="Filters and settings">
+                        <h3>Filters &amp; Settings <button class="config-close" onclick="closeConfig()" aria-label="Close">✕</button></h3>
+                        <div class="config-section"><h4>Default OTP Patterns</h4><div id="defaultPatternsList"></div>
+                            <div class="config-add"><input id="newDefaultPattern" placeholder='Regex e.g. (\d{4,8})'><button onclick="addDefaultPattern()">+ Add</button></div>
+                        </div>
+                        <div class="config-section"><h4>Number-Specific Rules</h4><div id="numberRulesList"></div>
+                            <div class="config-add"><input id="newRulePhone" placeholder="Phone / sender" style="max-width:160px"><input id="newRulePattern" placeholder="Pattern"><button onclick="addNumberRule()">+ Add</button></div>
+                        </div>
+                        <div class="config-section"><h4>Settings</h4>
+                            <div class="setting-row"><label for="cfgAutoDelete">Auto-delete (minutes)</label><input type="number" id="cfgAutoDelete" min="1" max="1440" value="30"></div>
+                        </div>
+                        <!-- send() is fire-and-forget by design, so a broken service account
+                             is silent: this is the first place to look when push feels slow. -->
+                        <div class="config-section"><h4>Push (FCM)</h4>
+                            <div id="fcmStatus" class="fcm-status">—</div>
+                        </div>
+                        <!-- Which source the running filters came from, and whether your last
+                             save actually reached durable storage. -->
+                        <div class="config-section"><h4>Config storage</h4>
+                            <div id="configStatus" class="fcm-status">—</div>
+                        </div>
+                        <div class="config-section"><h4>History archive</h4>
+                            <div id="archiveStatus" class="fcm-status">—</div>
+                        </div>
+                        <div id="settingsNotice" class="config-error admin-notice"></div>
+                        <div class="config-section"><h4>Allowed server hosts</h4>
+                            <div id="hostsList"></div>
+                            <div class="config-add"><input id="newHost" placeholder="spare.onrender.com"><button onclick="addHost()">+ Add</button></div>
+                        </div>
+                        <div class="config-section"><h4>Move phones to another server</h4>
+                            <div class="fcm-status" style="margin-bottom:10px">
+                                Pushes the new address to every installed app over FCM — no reinstall.
+                                The host must be on the allowed list above, or the phones will refuse it.
+                                <span class="fcm-idle">A phone with no Play Services, or one an OEM battery
+                                manager has force-stopped, will not receive this and must be changed by hand.</span>
+                            </div>
+                            <div class="config-add">
+                                <input id="newServerUrl" placeholder="https://spare.onrender.com">
+                                <button onclick="pushServerUrl()">Push to all phones</button>
+                            </div>
+                        </div>
+                        <!-- Filled by saveConfig() when the server REFUSES a pattern. -->
+                        <div id="configError" class="config-error"></div>
+                        <button class="save-config-btn" onclick="saveConfig()">Save all changes</button>
+                    </div>
+                </div>
+
+                <!-- DEVICES (admin) -->
+                <div id="adminOverlay" class="config-overlay">
+                    <div class="config-modal wide" role="region" aria-label="Devices">
+                        <h3>Devices <button class="config-close" onclick="closeAdmin()" aria-label="Close">✕</button></h3>
+                        <div id="adminNotice" class="config-error admin-notice"></div>
+                        <div id="dupBanner" class="dup-banner" hidden></div>
+                        <div class="config-section">
+                            <h4>Devices <span class="a-count" id="devicesCount">0</span>
+                                <label id="inactiveToggleWrap" style="margin-left:auto;font-family:var(--sans);letter-spacing:0;text-transform:none;font-size:13px;font-weight:400;color:var(--text-2);cursor:pointer;display:none">
+                                    <input type="checkbox" id="showInactive" style="vertical-align:middle;accent-color:var(--cyan)"> Show inactive (<span id="inactiveCount">0</span>)</label></h4>
+                            <div id="devicesList" class="a-list"></div>
+                            <div class="a-note" style="margin-top:12px">SIM numbers come from each phone and update the moment they change.
+                                The <b>Fallback SIM</b> field is only for a phone that reports no number at all — its
+                                messages are otherwise filed under a device key that <span class="mono">GET /get</span> cannot reach.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- USERS (admin) — split out of Devices (Riad, 4.41.1). -->
+                <div id="usersOverlay" class="config-overlay">
+                    <div class="config-modal wide" role="region" aria-label="Users">
+                        <h3>Users <button class="config-close" onclick="closeUsers()" aria-label="Close">✕</button></h3>
+                        <div id="usersNotice" class="config-error admin-notice"></div>
+                        <div class="config-section">
+                            <h4>Users <span class="a-count" id="usersCount">0</span></h4>
+                            <div id="usersList" class="a-list"></div>
+                            <div class="config-add"><input id="newUserName" placeholder="Name, e.g. Rahim"><button onclick="createUser()">+ Create user</button></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- HISTORY (admin) -->
+                <div id="historyOverlay" class="config-overlay">
+                    <div class="config-modal wide" role="region" aria-label="History">
+                        <h3>History <button class="config-close" onclick="closeHistory()" aria-label="Close">✕</button></h3>
+                        <div id="historyNotice" class="config-error"></div>
+                        <div class="config-section"><h4>Last 30 days</h4>
+                            <div id="historyStrip" class="strip"></div>
+                            <div id="historyTotals" class="fcm-status">—</div>
+                        </div>
+                        <div class="config-section"><h4>Messages</h4>
+                            <div class="config-add">
+                                <select id="histUser" onchange="loadHistory()" aria-label="User"><option value="">All users</option></select>
+                                <select id="histOutcome" onchange="renderHistory()" aria-label="Outcome">
+                                    <option value="">Any outcome</option>
+                                    <option value="fetched">fetched</option>
+                                    <option value="expired">never fetched</option>
+                                    <option value="superseded">superseded</option>
+                                    <option value="no_code">no code extracted</option>
+                                    <option value="cleared">cleared</option>
+                                </select>
+                                <input id="histSearch" placeholder="sender or number" oninput="renderHistory()" aria-label="Search history">
+                            </div>
+                            <div class="hist-toolbar">
+                                <label class="hist-check"><input type="checkbox" id="histAll" onchange="toggleAllHistory(this)"> Select all shown</label>
+                                <span id="histSelCount" class="mono"></span>
+                                <div class="bar-spacer"></div>
+                                <button class="tb-btn hist-danger" id="histDelSel" onclick="deleteSelectedHistory()" disabled>Delete selected</button>
+                            </div>
+                            <div id="historyList" style="margin-top:10px"></div>
+                        </div>
+                        <div class="config-section"><h4>Bulk delete</h4>
+                            <div class="config-add">
+                                <input id="histOlderThan" type="number" min="1" value="30" style="max-width:120px" aria-label="Days">
+                                <button onclick="deleteHistoryOlder()">Delete older than N days</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SEND SMS (4.41.0) — a real SMS from one of your phones' SIM cards. -->
+                <div id="sendOverlay" class="config-overlay">
+                    <div class="config-modal wide" role="region" aria-label="Send SMS">
+                        <h3>Send SMS <button class="config-close" onclick="closeSend()" aria-label="Close">✕</button></h3>
+                        <div id="sendNotice" class="config-error"></div>
+                        <div class="send-layout">
+                            <section aria-label="Compose">
+                                <div class="step">
+                                    <div class="step-head"><span class="step-n">1</span><h4>Send from</h4>
+                                        <span class="step-hint">Online phones with a confirmed number</span></div>
+                                    <div id="sendFrom" class="sender-grid"></div>
+                                </div>
+                                <div class="step">
+                                    <div class="step-head"><span class="step-n">2</span><h4>Send to</h4>
+                                        <span class="step-hint" id="sendToCount">0 of 100</span></div>
+                                    <div class="field-row">
+                                        <label class="field">Any number
+                                            <input id="sendTyped" placeholder="01711111111, 01822… (comma or space)" autocomplete="off"></label>
+                                        <button class="tb-btn" style="height:44px" onclick="addTypedRecipients()">Add</button>
+                                    </div>
+                                    <div id="sendUsersWrap" style="display:flex;flex-direction:column;gap:8px">
+                                        <span style="font-size:13px;color:var(--text-2)">Or a user — every confirmed SIM on their phones is added</span>
+                                        <div id="sendUsers" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+                                    </div>
+                                    <div id="sendRecipients" class="chips"></div>
+                                    <div id="sendToNote" class="note-warn"></div>
+                                </div>
+                                <div class="step">
+                                    <div class="step-head"><span class="step-n">3</span><h4>Message</h4></div>
+                                    <label class="field">Text — English or Bangla, up to 3 SMS parts
+                                        <textarea id="sendMessage" rows="5" placeholder="Type the message…" oninput="updateSendSummary()"></textarea></label>
+                                    <div class="meter"><i id="sendM1"></i><i id="sendM2"></i><i id="sendM3"></i><span id="sendCount">Empty</span></div>
+                                </div>
+                                <div class="send-bar">
+                                    <div class="grow"><b id="sendSummary">Add at least one recipient</b><span id="sendSummarySub">Numbers, users, or both</span></div>
+                                    <button id="sendBtn" class="primary-btn" onclick="submitSend()" disabled>Send</button>
+                                </div>
+                            </section>
+                            <aside aria-label="Outbox">
+                                <div class="step">
+                                    <div class="step-head"><h4>Outbox</h4><span class="step-hint">updates live</span></div>
+                                    <div id="sendQuota" class="quota">—</div>
+                                    <div id="outboxList" class="outbox"></div>
+                                </div>
+                            </aside>
+                        </div>
+                    </div>
+                </div>
             </main>
-        </div>
-    </div>
-
-    <!-- FILTERS & SETTINGS -->
-    <div id="configOverlay" class="config-overlay">
-        <div class="config-modal" role="dialog" aria-label="Filters and settings">
-            <h3>Filters &amp; Settings <button class="config-close" onclick="closeConfig()" aria-label="Close">✕</button></h3>
-            <div class="config-section"><h4>Default OTP Patterns</h4><div id="defaultPatternsList"></div>
-                <div class="config-add"><input id="newDefaultPattern" placeholder='Regex e.g. (\d{4,8})'><button onclick="addDefaultPattern()">+ Add</button></div>
-            </div>
-            <div class="config-section"><h4>Number-Specific Rules</h4><div id="numberRulesList"></div>
-                <div class="config-add"><input id="newRulePhone" placeholder="Phone / sender" style="max-width:160px"><input id="newRulePattern" placeholder="Pattern"><button onclick="addNumberRule()">+ Add</button></div>
-            </div>
-            <div class="config-section"><h4>Settings</h4>
-                <div class="setting-row"><label for="cfgAutoDelete">Auto-delete (minutes)</label><input type="number" id="cfgAutoDelete" min="1" max="1440" value="30"></div>
-            </div>
-            <!-- send() is fire-and-forget by design, so a broken service account
-                 is silent: this is the first place to look when push feels slow. -->
-            <div class="config-section"><h4>Push (FCM)</h4>
-                <div id="fcmStatus" class="fcm-status">—</div>
-            </div>
-            <!-- Which source the running filters came from, and whether your last
-                 save actually reached durable storage. -->
-            <div class="config-section"><h4>Config storage</h4>
-                <div id="configStatus" class="fcm-status">—</div>
-            </div>
-            <!-- Filled by saveConfig() when the server REFUSES a pattern. -->
-            <div id="configError" class="config-error"></div>
-            <button class="save-config-btn" onclick="saveConfig()">Save all changes</button>
-        </div>
-    </div>
-
-    <!-- DEVICES & USERS (admin) -->
-    <div id="adminOverlay" class="config-overlay">
-        <div class="config-modal wide" role="dialog" aria-label="Devices and users">
-            <h3>Devices &amp; Users <button class="config-close" onclick="closeAdmin()" aria-label="Close">✕</button></h3>
-            <div id="adminNotice" class="config-error"></div>
-            <div class="config-section">
-                <h4>Devices <span class="a-count" id="devicesCount">0</span>
-                    <label id="inactiveToggleWrap" style="margin-left:auto;font-family:var(--sans);letter-spacing:0;text-transform:none;font-size:13px;font-weight:400;color:var(--text-2);cursor:pointer;display:none">
-                        <input type="checkbox" id="showInactive" style="vertical-align:middle;accent-color:var(--cyan)"> Show inactive (<span id="inactiveCount">0</span>)</label></h4>
-                <div id="devicesList" class="a-list"></div>
-                <div class="a-note" style="margin-top:12px">SIM numbers come from each phone and update the moment they change.
-                    The <b>Fallback SIM</b> field is only for a phone that reports no number at all — its
-                    messages are otherwise filed under a device key that <span class="mono">GET /get</span> cannot reach.</div>
-            </div>
-            <div class="config-section">
-                <h4>Users <span class="a-count" id="usersCount">0</span></h4>
-                <div id="usersList" class="a-list"></div>
-                <div class="config-add"><input id="newUserName" placeholder="Name, e.g. Rahim"><button onclick="createUser()">+ Create user</button></div>
-            </div>
-            <div class="config-section"><h4>Allowed server hosts</h4>
-                <div id="hostsList"></div>
-                <div class="config-add"><input id="newHost" placeholder="spare.onrender.com"><button onclick="addHost()">+ Add</button></div>
-            </div>
-            <div class="config-section"><h4>Move phones to another server</h4>
-                <div class="fcm-status" style="margin-bottom:10px">
-                    Pushes the new address to every installed app over FCM — no reinstall.
-                    The host must be on the allowed list above, or the phones will refuse it.
-                    <span class="fcm-idle">A phone with no Play Services, or one an OEM battery
-                    manager has force-stopped, will not receive this and must be changed by hand.</span>
-                </div>
-                <div class="config-add">
-                    <input id="newServerUrl" placeholder="https://spare.onrender.com">
-                    <button onclick="pushServerUrl()">Push to all phones</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- HISTORY (admin) -->
-    <div id="historyOverlay" class="config-overlay">
-        <div class="config-modal wide" role="dialog" aria-label="History">
-            <h3>History <button class="config-close" onclick="closeHistory()" aria-label="Close">✕</button></h3>
-            <div id="historyNotice" class="config-error"></div>
-            <div class="config-section"><h4>Last 30 days</h4>
-                <div id="historyStrip" class="strip"></div>
-                <div id="historyTotals" class="fcm-status">—</div>
-            </div>
-            <div class="config-section"><h4>Messages</h4>
-                <div class="config-add">
-                    <select id="histUser" onchange="loadHistory()" aria-label="User"><option value="">All users</option></select>
-                    <select id="histOutcome" onchange="renderHistory()" aria-label="Outcome">
-                        <option value="">Any outcome</option>
-                        <option value="fetched">fetched</option>
-                        <option value="expired">never fetched</option>
-                        <option value="superseded">superseded</option>
-                        <option value="no_code">no code extracted</option>
-                        <option value="cleared">cleared</option>
-                    </select>
-                    <input id="histSearch" placeholder="sender or number" oninput="renderHistory()" aria-label="Search history">
-                </div>
-                <div class="hist-toolbar">
-                    <label class="hist-check"><input type="checkbox" id="histAll" onchange="toggleAllHistory(this)"> Select all shown</label>
-                    <span id="histSelCount" class="mono"></span>
-                    <div class="bar-spacer"></div>
-                    <button class="tb-btn hist-danger" id="histDelSel" onclick="deleteSelectedHistory()" disabled>Delete selected</button>
-                </div>
-                <div id="historyList" style="margin-top:10px"></div>
-            </div>
-            <div class="config-section"><h4>Bulk delete</h4>
-                <div class="config-add">
-                    <input id="histOlderThan" type="number" min="1" value="30" style="max-width:120px" aria-label="Days">
-                    <button onclick="deleteHistoryOlder()">Delete older than N days</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- SEND SMS (4.41.0) — a real SMS from one of your phones' SIM cards. -->
-    <div id="sendOverlay" class="config-overlay">
-        <div class="config-modal wide" role="dialog" aria-label="Send SMS">
-            <h3>Send SMS <button class="config-close" onclick="closeSend()" aria-label="Close">✕</button></h3>
-            <div id="sendNotice" class="config-error"></div>
-            <div class="send-layout">
-                <section aria-label="Compose">
-                    <div class="step">
-                        <div class="step-head"><span class="step-n">1</span><h4>Send from</h4>
-                            <span class="step-hint">Online phones with a confirmed number</span></div>
-                        <div id="sendFrom" class="sender-grid"></div>
-                    </div>
-                    <div class="step">
-                        <div class="step-head"><span class="step-n">2</span><h4>Send to</h4>
-                            <span class="step-hint" id="sendToCount">0 of 100</span></div>
-                        <div class="field-row">
-                            <label class="field">Any number
-                                <input id="sendTyped" placeholder="01711111111, 01822… (comma or space)" autocomplete="off"></label>
-                            <button class="tb-btn" style="height:44px" onclick="addTypedRecipients()">Add</button>
-                        </div>
-                        <div id="sendUsersWrap" style="display:flex;flex-direction:column;gap:8px">
-                            <span style="font-size:13px;color:var(--text-2)">Or a user — every confirmed SIM on their phones is added</span>
-                            <div id="sendUsers" style="display:flex;flex-wrap:wrap;gap:8px"></div>
-                        </div>
-                        <div id="sendRecipients" class="chips"></div>
-                        <div id="sendToNote" class="note-warn"></div>
-                    </div>
-                    <div class="step">
-                        <div class="step-head"><span class="step-n">3</span><h4>Message</h4></div>
-                        <label class="field">Text — English or Bangla, up to 3 SMS parts
-                            <textarea id="sendMessage" rows="5" placeholder="Type the message…" oninput="updateSendSummary()"></textarea></label>
-                        <div class="meter"><i id="sendM1"></i><i id="sendM2"></i><i id="sendM3"></i><span id="sendCount">Empty</span></div>
-                    </div>
-                    <div class="send-bar">
-                        <div class="grow"><b id="sendSummary">Add at least one recipient</b><span id="sendSummarySub">Numbers, users, or both</span></div>
-                        <button id="sendBtn" class="primary-btn" onclick="submitSend()" disabled>Send</button>
-                    </div>
-                </section>
-                <aside aria-label="Outbox">
-                    <div class="step">
-                        <div class="step-head"><h4>Outbox</h4><span class="step-hint">updates live</span></div>
-                        <div id="sendQuota" class="quota">—</div>
-                        <div id="outboxList" class="outbox"></div>
-                    </div>
-                </aside>
-            </div>
         </div>
     </div>
 
@@ -1051,6 +1085,7 @@
             }
 
             showDashboard();
+            openFromAddress();
             connectSSE();
             // The outbox feeds the "sent today" tile; quietly absent when the
             // server has users switched off.
@@ -1383,6 +1418,7 @@
             closeMessage(); return;
         }
         for (const [id, fn] of [['sendOverlay', closeSend],
+                                ['usersOverlay', closeUsers],
                                 ['historyOverlay', closeHistory],
                                 ['adminOverlay', closeAdmin],
                                 ['configOverlay', closeConfig]]) {
@@ -1705,6 +1741,33 @@
         renderConfigStatus();
         renderArchiveStatus();
         refreshFcmStatus();          // re-read: the cached copy is from login time
+    }
+
+    /**
+     * Is the history archive working? (§14b-quindecies)
+     *
+     * Called from openConfig and refreshFcmStatus since before 4.41 — and never
+     * defined, so both threw at this line: Settings opened without re-reading
+     * the server, and refreshFcmStatus silently skipped everything after it
+     * (the load banner, the override button, the target list). Found in 4.41.1.
+     */
+    function renderArchiveStatus() {
+        const el = document.getElementById('archiveStatus');
+        if (!el) return;
+        const h = historyStats;
+        if (!h) { el.innerHTML = '<span class="fcm-idle">Not reported by this server.</span>'; return; }
+        if (!h.enabled) {
+            el.innerHTML = '<span class="fcm-idle">Off.</span> Set HISTORY_ENABLED=true (needs Firestore) '
+                + 'to keep a record of every finished message.';
+            return;
+        }
+        el.innerHTML = `<span class="fcm-ok">On</span> · ${esc(h.written)} written since the server started`
+            + ` · ${esc(h.queued)} waiting · saved every ${esc(h.flushSeconds)}s`
+            + (h.retentionDays ? ` · kept ${esc(h.retentionDays)} days` : '')
+            + (h.dropped ? ` · <span class="fcm-bad">${esc(h.dropped)} dropped</span>` : '')
+            + (h.lastError ? `<br><span class="fcm-bad">Last error: ${esc(h.lastError)}</span>` : '')
+            + '<br><span class="fcm-idle">The getotp_history collection appears in Firestore only after '
+            + 'the first message finishes (fetched, superseded or expired).</span>';
     }
 
     /** Ask the server to re-read Firestore now, rather than waiting out a backoff. */
@@ -2075,17 +2138,32 @@
 
     async function openAdmin() {
         document.getElementById('adminOverlay').classList.add('open');
-        document.getElementById('adminNotice').classList.remove('show');
+        adminNotice('');
         await loadAdmin();
     }
     function closeAdmin() { document.getElementById('adminOverlay').classList.remove('open'); }
 
+    /** Users is its own page since 4.41.1; it shares loadAdmin() with Devices. */
+    async function openUsers() {
+        document.getElementById('usersOverlay').classList.add('open');
+        adminNotice('');
+        await loadAdmin();
+    }
+    function closeUsers() { document.getElementById('usersOverlay').classList.remove('open'); }
+
+    /**
+     * The admin pages' message line. Devices, Users and Settings each have one
+     * (they were one panel); the message goes to every one of them, so it is on
+     * whichever page the action was taken from.
+     */
     function adminNotice(text, isError) {
-        const el = document.getElementById('adminNotice');
-        el.textContent = text;
-        el.classList.toggle('show', !!text);
-        el.style.color = isError ? 'var(--red)' : 'var(--teal)';
-        el.style.borderColor = isError ? 'rgba(255,77,77,0.35)' : 'rgba(0,212,170,0.35)';
+        document.querySelectorAll('.admin-notice').forEach(el => {
+            el.textContent = text;
+            el.classList.toggle('show', !!text);
+            el.style.color = isError ? 'var(--red-soft)' : 'var(--cyan-soft)';
+            el.style.borderColor = isError ? 'var(--red-line)' : 'var(--cyan-line)';
+            el.style.background = isError ? 'var(--red-dim)' : 'var(--cyan-dim)';
+        });
     }
 
     async function loadAdmin() {
@@ -2182,8 +2260,87 @@
         return seenAgo(sec);
     }
 
+    /**
+     * Which rows are EARLIER INSTALLS of a phone that is listed again (4.41.1).
+     *
+     * Every row is one device id. A phone gets a new id when the app is
+     * reinstalled and the old id cannot be kept: the first reinstall of a phone
+     * set up before app 4.34.0 (its id was random), or installing an APK SIGNED
+     * WITH A DIFFERENT KEY — Android gives each signing key its own ANDROID_ID,
+     * so a build made on another computer is, to the server, another phone. The
+     * old row then goes silent and stays listed until the 7-day hide.
+     *
+     * A row is called an old copy only when it is SILENT (no contact for an
+     * hour), and a row of the SAME MODEL either first appeared around the time
+     * it went silent, or carries one of its SIM numbers. Two genuinely different
+     * phones of one model can still look like this, so nothing is removed
+     * without a confirmation that names every row.
+     *
+     * @returns {Map<string, object>} old row id -> the newer row it is a copy of
+     */
+    function findOldCopies(all) {
+        const now = Date.now();
+        const model = d => String(d.model || '').trim().toLowerCase();
+        const numbers = d => new Set((Array.isArray(d.sims) ? d.sims : []).map(x => x.number)
+            .concat(d.simNumber ? [d.simNumber] : []).filter(Boolean));
+        const out = new Map();
+        for (const d of all) {
+            const last = d.lastActive || d.createdAt || 0;
+            if (!model(d) || now - last < 3600_000) continue;
+            const mine = numbers(d);
+            let best = null;
+            for (const x of all) {
+                if (x.id === d.id || model(x) !== model(d) || !((x.createdAt || 0) > (d.createdAt || 0))) continue;
+                const shares = Array.from(mine).some(n => numbers(x).has(n));
+                const tookOver = (x.createdAt || 0) >= last - 30 * 60_000;
+                if ((shares || tookOver) && (!best || x.createdAt > best.createdAt)) best = x;
+            }
+            if (best) out.set(d.id, best);
+        }
+        return out;
+    }
+
+    async function removeOldCopies() {
+        const list = window._oldCopies || [];
+        if (!list.length) return;
+        if (!confirm('Remove these ' + list.length + ' old row(s)?\n\n'
+            + list.map(x => '\u2022 ' + x.d.name + ' (' + x.d.id + ') \u2014 last contact '
+                + (x.d.lastActive ? sinceWhen(x.d.lastActive) : 'never')
+                + '\n   newer: ' + x.newer.name + ' (' + x.newer.id + ')').join('\n')
+            + '\n\nOnly the old rows go. If one of them is in fact a separate phone that is just '
+            + 'switched off, it comes back only by reinstalling the app on it.')) return;
+        let n = 0;
+        for (const x of list) {
+            try {
+                const res = await fetch('/api/devices/' + encodeURIComponent(x.d.id) + '/remove',
+                    { method: 'POST', headers: authHeaders(), body: '{}' });
+                if (res.ok) n++;
+            } catch (e) { /* counted below */ }
+        }
+        adminNotice(n === list.length ? 'Removed ' + n + ' old row(s)'
+            : 'Removed ' + n + ' of ' + list.length + ' — reload and try the rest again', n !== list.length);
+        await loadAdmin();
+    }
+
     function renderDevices(allDevices, users) {
         const el = document.getElementById('devicesList');
+        const copies = findOldCopies(allDevices);
+        window._oldCopies = Array.from(copies.entries())
+            .map(([id, newer]) => ({ d: allDevices.find(x => x.id === id), newer }))
+            .filter(x => x.d && !x.d.inactive);
+        const banner = document.getElementById('dupBanner');
+        const warn = document.getElementById('navDevicesWarn');
+        if (warn) warn.hidden = !window._oldCopies.length;
+        if (banner) {
+            banner.hidden = !window._oldCopies.length;
+            banner.innerHTML = window._oldCopies.length
+                ? `<div class="grow"><b>${window._oldCopies.length} row(s) look like an earlier install of a phone that is listed again.</b>
+                   A phone gets a new row when the app is reinstalled and its old id cannot be kept \u2014 most often
+                   when the APK was built on a different computer (each signing key gives the app a different
+                   Android id). Old rows stop checking in, hide after 7 days and are deleted after 15.</div>
+                   <button data-act="removeOldCopies">Remove old rows</button>`
+                : '';
+        }
         // Devices silent for more than a week are hidden unless asked for, and
         // the server deletes them after the second limit (4.39.0).
         const inactive = allDevices.filter(d => d.inactive);
@@ -2209,7 +2366,26 @@
             .concat(users.filter(u => u.active)
                          .map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`)).join('');
         const now = Date.now();
+        const isLive = d => d.lastSeen && now - d.lastSeen < 90_000;
+        const rank = d => copies.has(d.id) ? 2 : (isLive(d) ? 0 : 1);
+        devices.sort((a, b) => rank(a) - rank(b) || (b.lastActive || 0) - (a.lastActive || 0));
+        const GROUPS = ['ONLINE', 'OFFLINE', 'OLD COPIES'];
+        let lastGroup = -1;
         el.innerHTML = devices.map(d => {
+            const g = rank(d);
+            const head = g !== lastGroup ? `<div class="dev-group">${GROUPS[g]} \u00b7 ${
+                devices.filter(x => rank(x) === g).length}</div>` : '';
+            lastGroup = g;
+            return head + deviceCard(d, copies.get(d.id), now, opts, pushOpts);
+        }).join('');
+        // While a push is unconfirmed, keep this list fresh so "saved on phone"
+        // appears by itself — the phone confirms within one poll.
+        if (devices.some(d => d.pendingUsername)) watchDevicesFor(10 * 60_000);
+    }
+
+    /** One device card. */
+    function deviceCard(d, copyOf, now, opts, pushOpts) {
+        {
             const age = d.lastSeen ? Math.round((now - d.lastSeen) / 1000) : null;
             // Two poll intervals: one missed poll is normal, two is a phone
             // worth looking at.
@@ -2234,14 +2410,17 @@
                 : 'Fallback, for a phone that reports NO SIM number. Set it only then \u2014 '
                   + 'otherwise its OTPs are stored under a device key and GET /get cannot '
                   + 'find them. Leave blank on a dual-SIM phone where neither SIM resolves.';
+            const added = d.createdAt ? new Date(d.createdAt).toLocaleDateString('en-GB',
+                { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short' }) : '';
             return `
-            <div class="a-card ${state}">
+            <div class="a-card ${state}${copyOf ? ' is-dup' : ''}">
                 <div class="a-head">
                     <div class="a-avatar">${esc(initial(d.name || d.model))}</div>
                     <div class="a-ident">
-                        <div class="a-name">${esc(d.name)}</div>
-                        <div class="a-sub">${esc(d.id.slice(0, 12))}${
-                            d.model ? ' \u00b7 ' + esc(d.model) : ''}${
+                        <div class="a-name">${esc(d.name)}${d.model && d.model !== d.name
+                            ? ' <span style="font-weight:500;color:var(--text-2)">' + esc(d.model) + '</span>' : ''}</div>
+                        <div class="a-sub">${esc(d.id)}${added ? ' \u00b7 added ' + esc(added) : ''}${
+                            ''}${
                             d.appVersion ? ' \u00b7 app ' + esc(d.appVersion) : ''} \u00b7 ${
                             d.canSendSms === true ? 'can send SMS'
                             : d.canSendSms === false ? 'SMS permission off' : 'cannot send (app &lt; 4.36)'}</div>
@@ -2277,16 +2456,16 @@
                             title="Sets this user as the owner AND writes the name into the app's Settings on this phone">Push</button>
                     <span class="spacer"></span>
                 </div>
+                ${copyOf ? `<div class="a-note" style="color:var(--orange-soft)">Probably an earlier install of
+                    <b>${esc(copyOf.name)}</b> (${esc(copyOf.id)}), which first appeared ${esc(hhmm(copyOf.createdAt))}
+                    ${d.userId && !copyOf.userId ? ' \u2014 give that one this owner before removing this row' : ''}.</div>` : ''}
                 ${d.inactive ? inactiveLine(d, now) : ''}
                 ${d.sharedId ? `<div class="a-note" style="color:var(--amber)">Two phones are `
                     + `reporting this same device id (a cloned system image). They share this `
                     + `card, and removing one is undone by the other.</div>` : ''}
                 ${deviceStatusLines(d, now)}
             </div>`;
-        }).join('');
-        // While a push is unconfirmed, keep this list fresh so "saved on phone"
-        // appears by itself — the phone confirms within one poll.
-        if (devices.some(d => d.pendingUsername)) watchDevicesFor(10 * 60_000);
+        }
     }
 
     /**
@@ -2612,6 +2791,7 @@
             case 'removeDevice': removeDevice(id);         break;
             case 'pushUsername': pushUsername(id);         break;
             case 'removeHost':   removeHost(parseInt(id, 10)); break;
+            case 'removeOldCopies': removeOldCopies(); break;
             case 'sendToggle':   setUserSend(id, { enabled: b.getAttribute('aria-pressed') !== 'true' }); break;
         }
     });
@@ -2915,28 +3095,54 @@
     // ═══════════════════════════════════════════════════════════
     //  NAVIGATION RAIL + STATS (4.41.0)
     // ═══════════════════════════════════════════════════════════
-    const PANELS = [['sendOverlay', 'send'], ['adminOverlay', 'admin'],
+    const PANELS = [['sendOverlay', 'send'], ['adminOverlay', 'admin'], ['usersOverlay', 'users'],
                     ['historyOverlay', 'history'], ['configOverlay', 'config']];
 
-    /** Back to the inbox: close whichever panel is open, through its own close function. */
+    /** Back to the inbox: close whichever page is open, through its own close function. */
     function closeAllPanels() {
         if (document.getElementById('sendOverlay').classList.contains('open')) closeSend();
         if (document.getElementById('adminOverlay').classList.contains('open')) closeAdmin();
+        if (document.getElementById('usersOverlay').classList.contains('open')) closeUsers();
         if (document.getElementById('historyOverlay').classList.contains('open')) closeHistory();
         if (document.getElementById('configOverlay').classList.contains('open')) closeConfig();
     }
 
-    /** The rail follows whichever panel is open — observed, so no open/close function had to change. */
+    /**
+     * The rail, the inbox and the address follow whichever page is open —
+     * observed, so no open/close function had to change. The address is
+     * REPLACED, not pushed: a reload returns to the same page, and Back still
+     * leaves the dashboard rather than stepping through every click.
+     */
+    let lastActivePage = null;
     function syncNav() {
         let active = 'inbox';
         for (const [id, name] of PANELS) {
             if (document.getElementById(id).classList.contains('open')) { active = name; break; }
         }
-        document.querySelectorAll('.nav-item').forEach(el =>
+        document.querySelectorAll('.nav-item[data-nav]').forEach(el =>
             el.classList.toggle('active', el.getAttribute('data-nav') === active));
+        const inbox = document.getElementById('inboxPage');
+        if (inbox) inbox.style.display = active === 'inbox' ? '' : 'none';
+        if (active !== lastActivePage) {
+            lastActivePage = active;
+            try { history.replaceState(null, '', active === 'inbox' ? location.pathname : '#' + active); }
+            catch (e) { /* file:// or a sandbox — the page still works */ }
+            window.scrollTo(0, 0);
+        }
     }
     new MutationObserver(syncNav).observe(document.body,
         { subtree: true, attributes: true, attributeFilter: ['class'] });
+
+    /** Open the page the address names, once signed in. Admin pages only for admin. */
+    function openFromAddress() {
+        const want = (location.hash || '').slice(1);
+        const isAdmin = me.role === 'admin';
+        const routes = { send: openSend,
+                         admin: isAdmin ? openAdmin : null, users: isAdmin ? openUsers : null,
+                         history: isAdmin ? openHistory : null,
+                         config: isAdmin ? () => { openConfig(); loadAdmin(); } : null };
+        if (routes[want]) routes[want]();
+    }
 
     /** Dhaka midnight, as the server counts the daily limit. */
     function dhakaDayStart() {

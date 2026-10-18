@@ -139,6 +139,32 @@ const register = (deviceId, sims, extra) => req('POST', '/api/register', { apiKe
     assert.strictEqual(o.quota.dailyLimit, null, 'admin has no daily limit');
     assert.ok(o.directory.some(u => u.userId === 'rahim'), 'admin sees every user in the directory');
 
+    // 4.41.1: no duplicates in the composer. An OLD row of a phone (an earlier
+    // install, silent for days) is not offered, an empty slot is not a card,
+    // and a number held by two rows appears once — on the newest.
+    const OLD = 'f6f6f6f6f6f6f6f6';
+    await register(OLD, [sim(1, '01822222222'), sim(2, '', { present: false })], { installId: 'ffffffffffffffff' });
+    await req('POST', `/api/devices/${OLD}/assign`, { token: admin, body: { userId: 'rahim' } });
+    users.getDevice(OLD).lastSeen = Date.now() - 9 * 86_400_000;
+    users.getDevice(OLD).seenAt = Date.now() - 9 * 86_400_000;
+    o = (await req('GET', '/api/send/options', { token: admin })).body;
+    assert.ok(!o.senders.some(x => x.deviceId === OLD), 'a phone silent for over a week is not offered');
+    const rahimDir = o.directory.find(u => u.userId === 'rahim');
+    assert.strictEqual(rahimDir.sims.filter(x => x.number === '01822222222').length, 1,
+        'a number appears once in the directory');
+    assert.strictEqual(rahimDir.sims.find(x => x.number === '01822222222').deviceId, B, 'on the live phone');
+    // Silent for 3 hours: within the week, but its number is on the live phone.
+    users.getDevice(OLD).lastSeen = Date.now() - 3 * 3600_000;
+    users.getDevice(OLD).seenAt = Date.now() - 3 * 3600_000;
+    o = (await req('GET', '/api/send/options', { token: admin })).body;
+    assert.strictEqual(o.senders.filter(x => x.number === '01822222222').length, 1,
+        'one sender card per number — the old row of the same SIM is not listed again');
+    assert.strictEqual(o.senders.find(x => x.number === '01822222222').deviceId, B);
+    users.getDevice(OLD).lastSeen = Date.now();
+    o = (await req('GET', '/api/send/options', { token: admin })).body;
+    assert.ok(!o.senders.some(x => x.deviceId === OLD && x.slot === 2), 'an empty slot is not a card');
+    users.removeDevice(OLD);
+
     let ro = (await req('GET', '/api/send/options', { token: rahim })).body;
     assert.ok(ro.senders.every(s => s.deviceId !== A), 'a user is offered only their own phones');
     assert.deepStrictEqual(ro.directory.map(u => u.userId), ['rahim'], 'and sees only their own SIMs');

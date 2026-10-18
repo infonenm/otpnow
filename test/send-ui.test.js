@@ -90,6 +90,23 @@ for (const f of (html.match(/url\(\/fonts\/[^)]+\)/g) || [])) {
     assert.ok(fs.existsSync(__dirname + '/../public' + file), 'font file exists: ' + file);
 }
 
+// Every dashboard function the script CALLS is DEFINED. renderArchiveStatus()
+// was called from two places for several releases and never existed; the throw
+// was swallowed and silently skipped the rest of refreshFcmStatus (4.41.1).
+const script = html.slice(html.indexOf('<script>'), html.lastIndexOf('</script>'));
+const defined = new Set(Array.from(script.matchAll(/function\s+([A-Za-z_$][\w$]*)\s*\(/g), m => m[1]));
+const called = new Set(Array.from(script.matchAll(
+    /(?<![\w$.'"`])((?:render|load|open|close|update|refresh|show|fill|apply|set|clear|toggle|start|connect|add|remove|delete|send|submit|cancel|watch|schedule|describe)[A-Z]\w*)\s*\(/g),
+    m => m[1]));
+const BROWSER = new Set(['setInterval', 'setTimeout', 'clearTimeout', 'clearInterval']);
+const undefinedCalls = Array.from(called).filter(n => !defined.has(n) && !BROWSER.has(n));
+assert.deepStrictEqual(undefinedCalls, [], 'called but never defined: ' + undefinedCalls.join(', '));
+
+// The pages: Devices and Users are separate, and the ⋯ menu is gone.
+assert.ok(/id="usersOverlay"/.test(html) && /data-nav="users"/.test(html), 'Users has its own page');
+assert.ok(!/id="menuBtn"/.test(html), 'no ⋯ menu button');
+assert.ok(/id="clearLogBtn"/.test(html), 'Clear phone log is still reachable');
+
 console.log('ok — the panel counts SMS parts and accepts numbers exactly as the server does, '
     + 'renders nothing unescaped, and serves its own fonts');
 process.exit(0);
