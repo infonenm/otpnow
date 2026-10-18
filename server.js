@@ -1092,8 +1092,17 @@ app.post('/api/register', requireApiKey, (req, res) => {
         // say so plainly rather than 404ing an app that will retry forever.
         return res.json({ success: true, usersEnabled: false });
     }
-    const { deviceId, model, name, claimedUser, installId } = req.body || {};
-    const device = store.users.registerDevice(deviceId, { model, name, claimedUser, installId });
+    const { deviceId, model, name, claimedUser, installId, sims } = req.body || {};
+    // SIM 1 / SIM 2 as the phone has them (app 4.35.0). Passed through ONLY
+    // when it is a list: an older app sends nothing, and "nothing" must keep
+    // what is stored rather than read as "both slots empty".
+    const simsBefore = store.users.simsVersion();
+    const device = store.users.registerDevice(deviceId, {
+        model, name, claimedUser, installId,
+        sims: Array.isArray(sims) ? sims : undefined
+    });
+    // An open Users & Devices panel shows the change without a reload.
+    if (store.users.simsVersion() !== simsBefore) store.notifyDevicesChanged();
 
     // REMOVED, and not reactivated by this attempt. 200 rather than 403 on
     // purpose: the app reads 401/403 from this server as "the API key is

@@ -489,6 +489,18 @@
         font-size:11.5px;color:var(--text-3);line-height:1.6;margin-top:9px;
         padding-left:11px;border-left:2px solid var(--border);
     }
+    /* SIM 1 / SIM 2 as the phone reports them (4.40.0). */
+    .sim-rows{margin-top:10px;display:flex;flex-direction:column;gap:5px}
+    .sim-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:var(--text-2)}
+    .sim-slot{font-family:var(--mono);font-size:10.5px;font-weight:600;color:var(--text-3);
+              min-width:42px}
+    .sim-num{font-family:var(--mono);font-size:12.5px;color:var(--text)}
+    .sim-src{font-size:10.5px;color:var(--text-3)}
+    .sim-row .warn{color:var(--amber)}
+    .sim-row .bad{color:var(--red)}
+    .sim-log{margin-top:8px;font-size:11.5px;color:var(--text-3)}
+    .sim-log summary{cursor:pointer;user-select:none}
+    .sim-log div{font-family:var(--mono);font-size:11px;line-height:1.7;padding-left:12px}
     .code-box{
         font-family:var(--mono);font-size:15px;color:var(--teal);background:var(--teal-dim);
         border:1px dashed var(--teal-line);border-radius:var(--radius-sm);
@@ -1082,6 +1094,23 @@
         });
 
         eventSource.addEventListener('clear_all', () => { allMessages = {}; renderAll(); notify('🗑️ All messages cleared'); });
+
+        // A phone reported a SIM change (4.40.0, admin only). Refresh the open
+        // Users & Devices panel — through the same polite watcher as a push:
+        // it waits while you are typing or have a choice picked, because a
+        // redraw resets every control in the list.
+        eventSource.addEventListener('devices_change', () => {
+            const list = document.getElementById('devicesList');
+            if (!list || list.offsetParent === null) return;      // panel closed
+            clearTimeout(window._devicesChangeTimer);
+            window._devicesChangeTimer = setTimeout(() => {
+                if (list.contains(document.activeElement) || window._pushPicked) {
+                    watchDevicesFor(60_000);                      // retry when free
+                } else {
+                    loadAdmin();
+                }
+            }, 400);
+        });
 
         eventSource.addEventListener('settings_change', e => {
             const d = JSON.parse(e.data);
@@ -2135,10 +2164,18 @@
             // to fix, not like a blank optional field. That is the whole reason
             // this card has an amber state at all.
             const simSet = !!d.simNumber;
-            const state = !live ? 'is-idle' : (simSet ? 'is-ok' : 'is-warn');
+            // What the PHONE says is in its slots (app 4.35.0). A phone that
+            // reports a number files its own OTPs under it, so the fallback
+            // field below is no longer something to fix for that phone.
+            const reported = (Array.isArray(d.sims) ? d.sims : []).filter(s => s.number);
+            const unconfirmed = (Array.isArray(d.sims) ? d.sims : []).some(s => s.unconfirmed);
+            const conflicts = (d.simConflicts || []).length > 0;
+            const state = !live ? 'is-idle'
+                : (unconfirmed || conflicts) ? 'is-warn'
+                : (simSet || reported.length) ? 'is-ok' : 'is-warn';
             const simTitle = simSet
-                ? 'Messages this phone cannot file itself are stored under this number.'
-                : 'Set this ONLY if this phone cannot read its own SIM number \u2014 '
+                ? 'Fallback: messages this phone cannot file itself are stored under this number.'
+                : 'Fallback, for a phone that reports NO SIM number. Set it only then \u2014 '
                   + 'otherwise its OTPs are stored under a device key and GET /get cannot '
                   + 'find them. Leave blank on a dual-SIM phone where neither SIM resolves.';
             return `
@@ -2154,17 +2191,20 @@
                         <span class="pill ${live ? 'pill-ok' : (d.inactive ? 'pill-warn' : 'pill-idle')}">${
                             age === null ? (d.lastActive ? sinceWhen(d.lastActive) : 'never seen')
                                          : live ? 'online' : seenAgo(age)}</span>
-                        ${simSet ? `<span class="pill pill-idle">${esc(d.simNumber)}</span>`
-                                 : '<span class="pill pill-warn">no SIM number</span>'}
+                        ${reported.map(s => `<span class="pill ${s.unconfirmed ? 'pill-warn' : 'pill-idle'}">${
+                            esc(s.number)}</span>`).join('')}
+                        ${!reported.length && simSet ? `<span class="pill pill-idle">${esc(d.simNumber)}</span>` : ''}
+                        ${!reported.length && !simSet ? '<span class="pill pill-warn">no SIM number</span>' : ''}
                     </div>
                 </div>
+                ${simRows(d)}
                 <div class="a-foot">
                     <div class="a-field"><label>Owner</label>
                         <select class="a-select" data-assign="${esc(d.id)}">${
                             opts.replace(`value="${esc(d.userId || '')}"`,
                                          `value="${esc(d.userId || '')}" selected`)}</select></div>
-                    <div class="a-field"><label>SIM</label>
-                        <input class="a-input${simSet ? '' : ' needed'}"
+                    <div class="a-field"><label>Fallback SIM</label>
+                        <input class="a-input${simSet || reported.length ? '' : ' needed'}"
                                data-sim="${esc(d.id)}" value="${esc(d.simNumber || '')}"
                                placeholder="01711111111" title="${simTitle}"></div>
                     <span class="spacer"></span>
@@ -2189,6 +2229,61 @@
         // While a push is unconfirmed, keep this list fresh so "saved on phone"
         // appears by itself — the phone confirms within one poll.
         if (devices.some(d => d.pendingUsername)) watchDevicesFor(10 * 60_000);
+    }
+
+    /**
+     * SIM 1 / SIM 2 as the phone reports them, and what changed (4.40.0).
+     *
+     * Everything here comes from the PHONE — typed in the app, found by Get
+     * Number, or read off the SIM — and is replaced by each report. "SIM
+     * changed" means a different card is in that slot and nobody has saved a
+     * number for it yet: whatever number shows there was not entered for it.
+     */
+    function simRows(d) {
+        if (!Array.isArray(d.sims)) {
+            return `<div class="a-note">SIM numbers not reported yet — this phone runs an app `
+                + `older than 4.35.0, or has not checked in since updating.</div>`;
+        }
+        const src = { manual: 'entered on phone', auto: 'read from SIM' };
+        const rows = d.sims.map(s => {
+            const num = s.number ? `<span class="sim-num">${esc(s.number)}</span>`
+                                 : `<span class="${s.unconfirmed ? 'warn' : ''}">not set</span>`;
+            const how = s.number && src[s.source] ? `<span class="sim-src">${src[s.source]}</span>` : '';
+            const changed = s.unconfirmed
+                ? `<span class="warn">⚠ SIM card changed${s.changedAt ? ' ' + hhmm(s.changedAt) : ''}`
+                  + `${s.changedFrom ? ' (was ' + esc(s.changedFrom) + ')' : ''} — number not confirmed `
+                  + `on the phone</span>`
+                : '';
+            return `<div class="sim-row"><span class="sim-slot">SIM ${esc(s.slot)}</span>${num}${how}${changed}</div>`;
+        });
+        for (const c of (d.simConflicts || [])) {
+            const where = c.devices.map(x => esc(x.name)
+                + (x.slot ? ' (SIM ' + esc(x.slot) + ')' : ' (fallback)')
+                + (x.inactive ? ' — inactive' : '')).join(', ');
+            rows.push(`<div class="sim-row"><span class="bad">⚠ ${esc(c.number)} is also on ${where}. `
+                + `One number on two phones — check which one really has that SIM.</span></div>`);
+        }
+        return `<div class="sim-rows">${rows.join('')}</div>${simLogBlock(d.simLog)}`;
+    }
+
+    function simLogBlock(log) {
+        if (!Array.isArray(log) || !log.length) return '';
+        const line = e => {
+            const f = esc(e.from), t = esc(e.to), n = 'SIM ' + esc(e.slot);
+            const ok = e.confirmed ? ' — confirmed after a SIM change' : '';
+            switch (e.event) {
+                case 'sim_changed': return `${n} card changed${f ? ' (was ' + f + ')' : ''}`
+                                           + `${t ? ', phone now shows ' + t : ''}`;
+                case 'set':       return `${n} set to ${t}${ok}`;
+                case 'changed':   return `${n} ${f} → ${t}${ok}`;
+                case 'cleared':   return `${n} cleared (was ${f})`;
+                case 'confirmed': return `${n} confirmed as ${t}`;
+                default:          return '';
+            }
+        };
+        return `<details class="sim-log"><summary>SIM changes (${log.length})</summary>`
+            + log.map(e => `<div>${hhmm(e.at)} · ${line(e)}</div>`).join('')
+            + `</details>`;
     }
 
     /** The note on a hidden (inactive) device: when it will be deleted. */
