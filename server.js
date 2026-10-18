@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.39.0
+ * server.js — GetOTP Render Server v4.41.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -35,6 +35,10 @@
  *   POST /api/filters     → Update filter rules (dashboard token auth)
  *   POST /api/auto-delete → Update auto-delete minutes (dashboard token auth)
  *   GET  /api/full-settings→ Full settings for dashboard (dashboard token auth)
+ *   POST /api/register    → Device announces itself + its SIMs (API key)
+ *   GET  /api/send/options, POST /api/send, GET /api/send/jobs, POST /api/send/cancel
+ *                         → Send real SMS from a phone's SIM (token auth, scoped by role)
+ *   GET  /api/send/pull, POST /api/send/report → the phone's side of sending (API key)
  *   GET  /health          → Keepalive
  *   GET  /                → Dashboard
  */
@@ -47,6 +51,7 @@ const otp     = require('./lib/otp');
 const fcm     = require('./lib/fcm');
 const firestore = require('./lib/firestore');
 const history   = require('./lib/history');
+const outbox    = require('./lib/outbox');
 
 // Initialize FCM (silent no-op if FIREBASE_SERVICE_ACCOUNT not set)
 fcm.init();
@@ -60,6 +65,8 @@ firestore.init();
 store.loadDurableConfig();
 store.loadIdentity();
 history.start();
+// The SMS outbox (4.41.0): loads its queue from Firestore, never blocking.
+outbox.start();
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -413,6 +420,10 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // by registering with it. The poll is the carrier that survives a phone
         // without Play Services; FCM (device_<id> topic) is the fast one.
         ...(pushName ? { pushUsername: pushName } : {}),
+        // SMS queued for THIS phone that it may pull now (4.41.0). The carrier
+        // for a phone FCM cannot reach; omitted when there is nothing to send.
+        ...(store.usersEnabled() && outbox.dueCount(req.query.deviceId) > 0
+              ? { sendDue: outbox.dueCount(req.query.deviceId) } : {}),
         // OMITTED when unconfigured, rather than sent as [].
         //
         // The app treats an empty list as "not configured" and allows any host —
@@ -925,6 +936,7 @@ app.post('/api/users/:id/active', usersGate, requireAdmin, requireIdentityLoaded
     const r = store.users.setActive(req.params.id, active);
     if (!r.ok) return res.status(404).json({ error: r.error });
     const killed = active ? 0 : store.revokeSessionsFor(store.users.slug(req.params.id));
+    outbox.sweep();          // a deactivated user's queued SMS must not go out
     res.json({ success: true, user: r.user, sessionsRevoked: killed });
 });
 
@@ -937,6 +949,7 @@ app.post('/api/users/:id/purge', usersGate, requireAdmin, requireIdentityLoaded,
     const r = store.users.purgeUser(id);
     if (!r.ok) return res.status(404).json({ error: r.error });
     store.revokeSessionsFor(id);
+    outbox.sweep();
     res.json({ success: true, unassignedDevices: r.unassignedDevices });
 });
 
@@ -1013,6 +1026,7 @@ app.post('/api/devices/:id/assign', usersGate, requireAdmin, requireIdentityLoad
     const { userId } = req.body || {};
     const r = store.users.assignDevice(req.params.id, userId === null ? null : userId);
     if (!r.ok) return res.status(400).json({ error: r.error });
+    outbox.sweep();          // a reassigned phone does not send its old owner's queue
     res.json({ success: true, device: r.device });
 });
 
@@ -1060,6 +1074,7 @@ app.post('/api/devices/:id/sim', usersGate, requireAdmin, requireIdentityLoaded,
 app.post('/api/devices/:id/remove', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const r = store.users.removeDevice(req.params.id);
     if (!r.ok) return res.status(404).json({ error: 'No such device' });
+    outbox.sweep();
     res.json({ success: true });
 });
 
@@ -1092,14 +1107,17 @@ app.post('/api/register', requireApiKey, (req, res) => {
         // say so plainly rather than 404ing an app that will retry forever.
         return res.json({ success: true, usersEnabled: false });
     }
-    const { deviceId, model, name, claimedUser, installId, sims } = req.body || {};
+    const { deviceId, model, name, claimedUser, installId, sims, canSendSms, appVersion } = req.body || {};
     // SIM 1 / SIM 2 as the phone has them (app 4.35.0). Passed through ONLY
     // when it is a list: an older app sends nothing, and "nothing" must keep
     // what is stored rather than read as "both slots empty".
     const simsBefore = store.users.simsVersion();
     const device = store.users.registerDevice(deviceId, {
         model, name, claimedUser, installId,
-        sims: Array.isArray(sims) ? sims : undefined
+        sims: Array.isArray(sims) ? sims : undefined,
+        // Can this phone send for the dashboard (app 4.36.0)? Absent = keep.
+        canSendSms: typeof canSendSms === 'boolean' ? canSendSms : undefined,
+        appVersion: typeof appVersion === 'string' ? appVersion : undefined
     });
     // An open Users & Devices panel shows the change without a reload.
     if (store.users.simsVersion() !== simsBefore) store.notifyDevicesChanged();
@@ -1126,6 +1144,65 @@ app.post('/api/register', requireApiKey, (req, res) => {
         claimStatus: store.users.claimStatus(device.id),
         allowedHosts: store.users.getAllowedHosts()
     });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// SEND SMS FROM THE DASHBOARD (server 4.41.0) — see lib/outbox.js
+// ═════════════════════════════════════════════════════════════════
+//
+// Dashboard side: any signed-in caller, scoped by role inside the outbox (a user
+// sends only from their own phones, and only when the admin has switched it on).
+// Phone side: the API key, plus the device id the job was queued for.
+
+// What the composer may offer this caller.
+app.get('/api/send/options', usersGate, requireToken, (req, res) => {
+    res.json(outbox.options(req.session));
+});
+
+app.post('/api/send', usersGate, requireToken, (req, res) => {
+    const r = outbox.createBatch(req.session, req.body);
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error, problems: r.problems, skipped: r.skipped });
+    res.json({ success: true, batchId: r.batchId, jobs: r.jobs, skipped: r.skipped });
+});
+
+app.get('/api/send/jobs', usersGate, requireToken, (req, res) => {
+    res.json({ jobs: outbox.list(req.session, req.query.limit),
+               quota: outbox.options(req.session).quota });
+});
+
+app.post('/api/send/cancel', usersGate, requireToken, (req, res) => {
+    const { jobId, batchId } = req.body || {};
+    if (!jobId && !batchId) return res.status(400).json({ error: 'Give jobId or batchId' });
+    res.json({ success: true, cancelled: outbox.cancel(req.session,
+        { jobId: jobId ? String(jobId) : null, batchId: batchId ? String(batchId) : null }) });
+});
+
+// Admin: who may send, and how many per day.
+app.post('/api/users/:id/send', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
+    const { enabled, dailyLimit } = req.body || {};
+    const r = store.users.setSendPermission(req.params.id, { enabled, dailyLimit });
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    // Switched off: their queued SMS expire NOW, not when a phone next asks.
+    outbox.sweep();
+    res.json({ success: true, user: r.user });
+});
+
+// The phone takes its next jobs. A removed device gets nothing.
+app.get('/api/send/pull', usersGate, requireApiKey, (req, res) => {
+    const deviceId = String(req.query.deviceId || '');
+    if (!/^[a-f0-9]{16}$/i.test(deviceId)) return res.status(400).json({ error: 'deviceId required' });
+    store.users.noteInstall(deviceId, req.query.installId);
+    if (store.users.isRevoked(deviceId)) return res.json({ jobs: [], revoked: true });
+    store.users.touchDevice(deviceId);
+    res.json({ jobs: outbox.pull(deviceId) });
+});
+
+// The phone reports what happened to a job.
+app.post('/api/send/report', usersGate, requireApiKey, (req, res) => {
+    const b = req.body || {};
+    const r = outbox.report(String(b.deviceId || ''), b);
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error });
+    res.json({ success: true, status: r.job.status });
 });
 
 // ═════════════════════════════════════════════════════════════════
@@ -1228,6 +1305,7 @@ app.get('/api/full-settings', requireToken, (req, res) => {
         fcm:     isAdmin ? fcm.getStatus() : null,
         config:  isAdmin ? store.configStatus() : null,
         history: isAdmin ? history.stats() : null,
+        outbox:  isAdmin ? outbox.stats() : null,
         identity: !store.usersEnabled() ? null : (isAdmin
             ? Object.assign(store.users.stats(), { overrides: store.listOverrides(),
                                                    overrideCeiling: store.overrideCeilingMinutes() })
@@ -1377,6 +1455,8 @@ async function shutdown(signal) {
         if (st.lastWriteOk === false) break;
         await new Promise(r => setTimeout(r, 50));
     } while (Date.now() < writesDeadline);
+    // The outbox queue: a job created just before a deploy must survive it.
+    try { await outbox.flush(); } catch (e) { /* logged inside */ }
     try {
         const n = await history.drain(Date.now() + SHUTDOWN_DEADLINE_MS - 1000);
         if (n) console.log(`[server] Archived ${n} message(s) on the way out`);

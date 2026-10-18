@@ -3,622 +3,583 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GetOTP Dashboard</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <meta name="color-scheme" content="dark">
+    <title>GetOTP Console</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 34'%3E%3Crect width='34' height='34' rx='9' fill='%23141A33'/%3E%3Cpath d='M17 6.5l8.5 3.2v6.4c0 5.2-3.6 9.5-8.5 11.4-4.9-1.9-8.5-6.2-8.5-11.4V9.7z' fill='none' stroke='%23F5B544' stroke-width='1.7'/%3E%3Cpath d='M18.3 11l-4.2 6.3h3.2l-1.3 5.7 4.6-7h-3.3z' fill='%23F5B544'/%3E%3C/svg%3E">
     <style>    /* ═══════════════════════════════════════════════════════════════
-       GetOTP dashboard — visual system
+       GetOTP Console — visual system (server 4.41.0, Riad approved the mockup)
 
-       Rewritten as one sheet rather than grown by accretion. Every class
-       name the JavaScript touches is preserved exactly; only the look
-       changes, so nothing had to be re-wired.
+       "Night console": a deep ink ground, ONE electric-cyan accent for what is
+       live and actionable, GOLD reserved for OTP codes (the brand's shield
+       colour), orange for "needs attention", red for broken or destructive.
+       Numbers and codes are monospace so they line up and read at a glance.
 
-       The rules it follows:
+       THE CONTRACT WITH THE SCRIPT BELOW: every id and every class name the
+       JavaScript reads, writes or toggles is kept exactly — the look changed,
+       the wiring did not. The modals are now full-height side panels, opened
+       from the navigation rail, with the same ids and the same open/close
+       functions.
 
-       - ONE SCALE. Spacing is 4/8/12/16/24, radii 8/12/16, and three text
-         sizes. The old sheet had eleven different paddings and nine radii,
-         which is most of why it read as untidy however the elements were
-         arranged.
-       - SURFACES, NOT BORDERS. Depth comes from three background levels;
-         borders are hairlines that separate rather than decorate.
-       - COLOUR MEANS SOMETHING. Teal = live and healthy, amber = attention,
-         red = destructive or broken. Nothing is coloured for decoration,
-         so a red thing on this screen is always worth reading.
-       - ONE ACCENT PER VIEW. Exactly one filled button (the forwarding
-         switch). Everything else is quiet until hovered, so the eye lands
-         on the control that matters.
+       Fonts are served from /fonts (SIL Open Font License, files beside them):
+       the CSP allows no third-party stylesheet or font, and a design that only
+       works when Google Fonts loads is a design that breaks on a slow network.
        ═══════════════════════════════════════════════════════════════ */
 
+    @font-face{font-family:'Space Grotesk';font-weight:400;font-display:swap;src:url(/fonts/space-grotesk-latin-400-normal.woff2) format('woff2')}
+    @font-face{font-family:'Space Grotesk';font-weight:500;font-display:swap;src:url(/fonts/space-grotesk-latin-500-normal.woff2) format('woff2')}
+    @font-face{font-family:'Space Grotesk';font-weight:600;font-display:swap;src:url(/fonts/space-grotesk-latin-600-normal.woff2) format('woff2')}
+    @font-face{font-family:'Space Grotesk';font-weight:700;font-display:swap;src:url(/fonts/space-grotesk-latin-700-normal.woff2) format('woff2')}
+    @font-face{font-family:'JetBrains Mono';font-weight:400;font-display:swap;src:url(/fonts/jetbrains-mono-latin-400-normal.woff2) format('woff2')}
+    @font-face{font-family:'JetBrains Mono';font-weight:600;font-display:swap;src:url(/fonts/jetbrains-mono-latin-600-normal.woff2) format('woff2')}
+
     :root{
-        /* Surfaces: page, panel, raised. Depth by level, not by shadow. */
-        --bg:#0a0e1a; --bg-panel:#111726; --bg-card:#161d30; --bg-hover:#1c2439;
-        --border:#222b42; --border-h:#2f3a57;
+        /* Ground and surfaces: depth by level, hairlines to separate. */
+        --bg:#090B14; --bg-bar:#0C0F1C; --bg-panel:#0E1222; --bg-card:#10152A;
+        --bg-sunk:#0A0D19; --bg-hover:#151B33; --bg-active:#141B33;
+        --border:#1F2440; --border-h:#2B335C; --border-active:#26315E;
 
-        --text-1:#e8ecf6; --text-2:#94a0bd; --text-3:#5d6885;
+        --text-1:#E8EBF7; --text-2:#A3A9C6; --text-3:#7A81A3; --text-4:#5D6488;
+        --text:#E8EBF7;
 
-        --teal:#00d4aa; --teal-dim:rgba(0,212,170,0.12); --teal-line:rgba(0,212,170,0.28);
-        --amber:#f5b544; --amber-dim:rgba(245,181,68,0.12);
-        --red:#f87171;   --red-dim:rgba(248,113,113,0.11); --red-line:rgba(248,113,113,0.32);
+        --cyan:#3DD9FF; --cyan-soft:#8CEBFF; --cyan-dim:#0F2633; --cyan-line:#26506A; --on-cyan:#06121A;
+        --gold:#F5B544; --gold-dim:#1A160C; --gold-line:#3A3220;
+        --orange:#FB923C; --orange-soft:#FDBA74; --orange-dim:#1A130A; --orange-line:#4A3417;
+        --red:#F87171; --red-soft:#FCA5A5; --red-dim:#1C0F16; --red-line:#4A2430;
 
-        --radius:12px; --radius-sm:8px; --radius-lg:16px;
-        --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
-        --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-        --shadow:0 8px 32px rgba(0,0,0,0.4);
+        /* Old names, still read by inline styles in the script. */
+        --teal:var(--cyan); --teal-dim:var(--cyan-dim); --teal-line:var(--cyan-line);
+        --amber:var(--orange-soft); --amber-dim:var(--orange-dim);
+
+        --radius:14px; --radius-sm:10px; --radius-lg:18px;
+        --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+        --sans:'Space Grotesk','Noto Sans Bengali','Segoe UI',system-ui,-apple-system,sans-serif;
+        --shadow:0 18px 48px rgba(0,0,0,0.5);
     }
 
     *{margin:0;padding:0;box-sizing:border-box}
+    html{background:var(--bg)}
     body{
-        background:var(--bg);
-        /* Two very soft radial washes stop a flat dark page looking dead.
-           Fixed, so they do not move with content. */
-        background-image:
-            radial-gradient(900px 500px at 12% -8%, rgba(0,212,170,0.05), transparent 60%),
-            radial-gradient(700px 400px at 92% 0%, rgba(99,102,241,0.05), transparent 55%);
-        background-attachment:fixed;
-        color:var(--text-1); font-family:var(--sans);
-        font-size:14px; line-height:1.5; min-height:100vh;
-        -webkit-font-smoothing:antialiased;
+        background:var(--bg);color:var(--text-1);font-family:var(--sans);
+        font-size:15px;line-height:1.5;min-height:100vh;-webkit-font-smoothing:antialiased;
     }
+    button,input,select,textarea{font:inherit;color:inherit}
+    :focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+    .mono{font-family:var(--mono)}
 
     /* ── Login ──────────────────────────────────────────────── */
     .login-container{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
     .login-box{
-        width:100%;max-width:380px;background:var(--bg-panel);
-        border:1px solid var(--border);border-radius:var(--radius-lg);
-        padding:32px;box-shadow:var(--shadow);
+        width:100%;max-width:400px;background:var(--bg-panel);
+        border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;box-shadow:var(--shadow);
     }
-    .login-box h2{font-size:22px;font-weight:700;margin-bottom:24px;letter-spacing:-0.02em}
-    .login-box h2 span{color:var(--teal)}
+    .login-brand{display:flex;align-items:center;gap:12px;margin-bottom:26px}
+    .login-box h2{font-size:22px;font-weight:700;letter-spacing:-0.01em;line-height:1.1}
+    .login-box h2 span{display:block;font-family:var(--mono);font-size:11px;font-weight:400;
+        letter-spacing:0.14em;color:var(--text-3);margin-top:4px}
     .login-box input{
-        width:100%;padding:12px 14px;margin-bottom:10px;
-        background:var(--bg-card);border:1px solid var(--border);
-        border-radius:var(--radius-sm);color:var(--text-1);font-size:14px;
-        font-family:var(--sans);outline:none;transition:border-color .15s;
+        width:100%;height:46px;padding:0 14px;margin-bottom:10px;
+        background:var(--bg-sunk);border:1px solid var(--border-h);border-radius:12px;
+        color:var(--text-1);font-size:15px;outline:none;transition:border-color .15s;
     }
-    .login-box input:focus{border-color:var(--teal-line)}
-    .login-box input::placeholder{color:var(--text-3)}
+    .login-box input:focus{border-color:var(--cyan)}
+    .login-box input::placeholder{color:var(--text-4)}
     .login-box button{
-        width:100%;padding:12px;margin-top:6px;background:var(--teal);border:none;
-        border-radius:var(--radius-sm);color:#04231c;font-weight:700;font-size:14px;
-        cursor:pointer;transition:opacity .15s;font-family:var(--sans);
+        width:100%;height:46px;margin-top:6px;background:var(--cyan);border:none;border-radius:12px;
+        color:var(--on-cyan);font-weight:700;font-size:15px;cursor:pointer;transition:filter .15s;
     }
-    .login-box button:hover{opacity:.9}
-    .error{color:var(--red);font-size:12.5px;margin-top:10px;min-height:16px}
-    .enroll-link{margin-top:18px;font-size:12.5px;color:var(--teal);cursor:pointer;opacity:.85}
-    .enroll-link:hover{opacity:1}
+    .login-box button:hover{filter:brightness(1.08)}
+    .error{color:var(--red-soft);font-size:13px;margin-top:10px;min-height:16px}
+    .enroll-link{margin-top:18px;font-size:13px;color:var(--cyan-soft);cursor:pointer;background:none;border:none;padding:0}
+    .enroll-link:hover{color:var(--cyan)}
     .enroll-box{display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
     .enroll-box.open{display:block}
 
     /* ── Shell ──────────────────────────────────────────────── */
-    .dashboard{display:none;max-width:1600px;margin:0 auto;padding:20px}
-    .dashboard.active{display:block}
+    .dashboard{display:none;min-height:100vh;flex-direction:column}
+    .dashboard.active{display:flex}
 
-    /* Top bar: two rows, grouped by what things do. Row 1 is state you
-       READ, row 2 is actions you TAKE. Sticky, because the forwarding
-       switch and the connection light must never scroll away. */
     .top-bar{
-        position:sticky;top:0;z-index:50;
-        background:rgba(17,23,38,0.88);backdrop-filter:blur(14px);
-        border:1px solid var(--border);border-radius:var(--radius-lg);
-        padding:10px 14px;margin-bottom:20px;
-        display:flex;align-items:center;gap:8px;box-shadow:var(--shadow);
+        position:sticky;top:0;z-index:50;background:rgba(12,15,28,0.92);backdrop-filter:blur(14px);
+        border-bottom:1px solid var(--border);padding:12px 22px;
+        display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;
     }
     .bar-spacer{flex:1 1 auto;min-width:0}
+    .logo{display:flex;align-items:center;gap:12px;margin-right:6px}
+    .logo-word{display:flex;flex-direction:column;line-height:1.1}
+    .logo-word b{font-size:18px;font-weight:700;letter-spacing:0.01em}
+    .logo-word span{font-family:var(--mono);font-size:10.5px;color:var(--text-3);letter-spacing:0.14em}
 
-    .logo{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800;letter-spacing:-0.02em}
-    .logo-icon{font-size:17px}
-    /* Who you are signed in as. On a multi-user dashboard this is the single
-       most important thing to be sure of before you press anything — an admin
-       action taken while you thought you were a user, or the reverse, is a
-       confusing five minutes. So it is tinted rather than grey. */
     .load-banner{
-        display:none;margin-bottom:16px;padding:14px 18px;
-        background:var(--red-dim);border:1px solid var(--red-line);
-        border-radius:var(--radius);color:var(--red);font-size:13px;line-height:1.6;
+        display:none;margin:16px 22px 0;padding:14px 18px;background:var(--red-dim);
+        border:1px solid var(--red-line);border-radius:var(--radius);color:var(--red-soft);font-size:14px;line-height:1.6;
     }
     .load-banner.show{display:block}
-    .load-banner b{color:var(--red)}
+    .load-banner b{color:var(--red-soft)}
     .load-banner button{margin-top:10px}
+
     .whoami{
-        display:inline-flex;align-items:center;gap:5px;
-        font-family:var(--mono);font-size:11.5px;font-weight:600;
-        color:var(--teal);background:var(--teal-dim);
-        border:1px solid var(--teal-line);
-        padding:5px 11px;border-radius:20px;white-space:nowrap;
+        display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 12px;border-radius:12px;
+        font-size:13px;font-weight:600;color:var(--cyan-soft);background:var(--cyan-dim);
+        border:1px solid var(--cyan-line);white-space:nowrap;
     }
-    .whoami::before{content:'👤';font-size:11px}
-    /* An admin is the account that can change things for everyone. */
-    .whoami.is-admin{color:var(--amber);background:var(--amber-dim);border-color:rgba(245,181,68,0.32)}
+    .whoami::before{
+        content:'';width:8px;height:8px;border-radius:50%;background:currentColor;flex:none;
+    }
+    .whoami.is-admin{color:var(--gold);background:var(--gold-dim);border-color:var(--gold-line)}
 
-    /* ONE pill, not a dot plus a word plus a second word. The dot is a
-       pseudo-element so setConnectionStatus() can keep setting textContent
-       without wiping it. */
-    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(61,217,255,0.35)}50%{box-shadow:0 0 0 5px rgba(61,217,255,0)}}
     .connection-status{
-        display:inline-flex;align-items:center;gap:6px;
-        font-size:11.5px;padding:5px 11px;border-radius:20px;font-weight:600;
-        background:rgba(255,255,255,0.05);color:var(--text-2);white-space:nowrap;
+        display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px;border-radius:20px;
+        font-size:13px;font-weight:500;border:1px solid var(--border);color:var(--text-2);white-space:nowrap;
     }
-    .connection-status::before{
-        content:'';width:6px;height:6px;border-radius:50%;background:currentColor;flex:0 0 auto;
-    }
-    .connection-status.connected{background:var(--teal-dim);color:var(--teal)}
-    .connection-status.connected::before{animation:pulse 2s infinite}
-    .connection-status.disconnected{background:var(--red-dim);color:var(--red)}
+    .connection-status::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--text-3);flex:none}
+    .connection-status.connected{color:var(--text-2)}
+    .connection-status.connected::before{background:var(--cyan);animation:pulse 2.4s infinite}
+    .connection-status.disconnected{color:var(--red-soft);border-color:var(--red-line);background:var(--red-dim)}
+    .connection-status.disconnected::before{background:var(--red)}
 
-    /* ── Buttons ────────────────────────────────────────────────
-       One shared shape. Quiet by default; the accent is reserved for the
-       forwarding switch so exactly one control asks for attention. */
-    /* ONE button shape for the whole bar. Six separate classes used to say the
-       same thing with slightly different numbers, which is a large part of why
-       the header never looked deliberate however the elements were arranged. */
+    /* ── Buttons ──────────────────────────────────────────────── */
     .tb-btn{
-        padding:8px 13px;background:var(--bg-card);border:1px solid var(--border);
-        border-radius:var(--radius-sm);color:var(--text-1);font-size:12.5px;font-weight:600;
-        cursor:pointer;transition:background .15s,border-color .15s,color .15s;
-        font-family:var(--sans);white-space:nowrap;
+        display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px;
+        background:var(--bg-panel);border:1px solid var(--border-h);border-radius:12px;
+        color:var(--text-1);font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap;
+        transition:background .15s,border-color .15s;
     }
-    .tb-btn:hover{background:var(--bg-hover);border-color:var(--border-h)}
+    .tb-btn:hover:not(:disabled){background:var(--bg-hover);border-color:var(--cyan-line)}
+    .tb-btn:disabled{opacity:.5;cursor:default}
+    .tb-btn svg{flex:none}
+    .primary-btn{
+        display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 18px;
+        background:var(--cyan);color:var(--on-cyan);border:none;border-radius:12px;
+        font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;transition:filter .15s,opacity .15s;
+    }
+    .primary-btn:hover:not(:disabled){filter:brightness(1.08)}
+    .primary-btn:disabled{background:var(--bg-hover);color:var(--text-4);cursor:not-allowed}
 
-    /* The only filled control on the page. */
+    /* The forwarding switch: a real switch, not a word. */
     .forward-toggle-btn{
-        padding:8px 15px;border-radius:var(--radius-sm);font-size:12.5px;font-weight:700;
-        cursor:pointer;border:1px solid transparent;transition:all .15s;font-family:var(--sans);
+        display:inline-flex;align-items:center;gap:10px;height:40px;padding:0 14px 0 8px;
+        border-radius:20px;font-size:14px;font-weight:600;cursor:pointer;
+        border:1px solid var(--border-h);background:var(--bg-panel);color:var(--text-1);
+        transition:background .15s,border-color .15s;
     }
-    .forward-toggle-btn.enabled{background:var(--teal);color:#04231c}
-    .forward-toggle-btn.enabled:hover{opacity:.9}
-    .forward-toggle-btn.disabled{background:var(--red-dim);color:var(--red);border-color:var(--red-line)}
+    .forward-toggle-btn::before{
+        content:'';width:38px;height:22px;border-radius:11px;flex:none;box-sizing:border-box;
+        background:#4A5070 radial-gradient(circle at 11px 50%, #E8EBF7 8px, transparent 8.5px);
+        transition:background .2s;
+    }
+    .forward-toggle-btn.enabled{border-color:var(--cyan-line);background:#0D1C2A}
+    .forward-toggle-btn.enabled::before{background:var(--cyan) radial-gradient(circle at 27px 50%, #E8EBF7 8px, transparent 8.5px)}
+    .forward-toggle-btn.disabled{border-color:var(--red-line);background:var(--red-dim);color:var(--red-soft)}
     .forward-toggle-btn:disabled{opacity:.55;cursor:default}
 
-    .search-bar{display:flex;gap:8px;flex:0 1 380px;min-width:180px}
-    .search-wrap{position:relative;flex:1;min-width:0;display:flex}
-    .search-wrap input{width:100%;padding-right:32px}
+    .search-bar{display:flex;gap:10px;flex:0 1 460px;min-width:0;flex-wrap:wrap}
+    .search-wrap{position:relative;flex:1 1 220px;min-width:0;display:flex}
+    .search-wrap svg{position:absolute;left:13px;top:50%;transform:translateY(-50%);pointer-events:none}
+    .search-bar .search-wrap input{width:100%;padding:0 36px 0 40px}
     .search-clear{
-        display:none;position:absolute;right:5px;top:50%;transform:translateY(-50%);
-        width:22px;height:22px;align-items:center;justify-content:center;
-        background:none;border:none;border-radius:50%;color:var(--text-3);
-        font-size:13px;line-height:1;cursor:pointer;transition:all .12s;
+        display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);
+        width:28px;height:28px;align-items:center;justify-content:center;
+        background:none;border:none;border-radius:8px;color:var(--text-3);font-size:14px;cursor:pointer;
     }
     .search-clear:hover{color:var(--text-1);background:var(--bg-hover)}
     .search-clear.show{display:flex}
     .search-bar input,.filter-dropdown{
-        padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);
-        border-radius:var(--radius-sm);color:var(--text-1);font-size:12.5px;
-        outline:none;font-family:var(--sans);transition:border-color .15s;
+        height:42px;padding:0 12px;background:var(--bg-sunk);border:1px solid var(--border-h);
+        border-radius:12px;color:var(--text-1);font-size:14px;outline:none;transition:border-color .15s;
     }
-    .search-bar input{flex:1;min-width:0}
-    .search-bar input:focus,.filter-dropdown:focus{border-color:var(--teal-line)}
-    .search-bar input::placeholder{color:var(--text-3)}
-    .filter-dropdown{cursor:pointer;max-width:170px}
+    .search-bar input:focus,.filter-dropdown:focus{border-color:var(--cyan)}
+    .search-bar input::placeholder{color:var(--text-4)}
+    .filter-dropdown{cursor:pointer;max-width:200px}
+    #commandTarget{height:40px;max-width:150px}
 
-    /* The three one-shot commands read as one unit, with the target they
-       are scoped to attached rather than floating beside unrelated things. */
-    #commandTarget{max-width:130px}
     .menu-wrap{position:relative}
-    /* Square, and sized by its hit area rather than by the glyph. "⋯" is a
-       text character, so a button padded for words ends up far smaller than it
-       looks — and on a control that opens everything else, that is the one to
-       get wrong last. */
-    .menu-btn{
-        display:inline-flex;align-items:center;justify-content:center;
-        width:38px;height:36px;padding:0;font-size:17px;line-height:1;
-        letter-spacing:0;font-weight:700;color:var(--text-2);
-        cursor:pointer;   /* stated here too: this is the control people aim at */
-    }
-    .menu-btn:hover{color:var(--teal);border-color:var(--teal-line)}
-    .menu-btn:hover{color:var(--text-1)}
-    .menu-wrap .menu.open + .menu-btn,.menu-btn:focus-visible{outline:none}
+    .menu-btn{width:40px;height:40px;padding:0;justify-content:center}
     .menu{
-        display:none;position:absolute;right:0;top:calc(100% + 8px);min-width:210px;
-        background:var(--bg-panel);border:1px solid var(--border-h);
-        border-radius:var(--radius);box-shadow:var(--shadow);padding:6px;z-index:100;
+        display:none;position:absolute;right:0;top:calc(100% + 8px);min-width:220px;
+        background:var(--bg-panel);border:1px solid var(--border-h);border-radius:var(--radius);
+        box-shadow:var(--shadow);padding:6px;z-index:100;
     }
     .menu.open{display:block}
     .menu-item{
-        display:flex;align-items:center;gap:9px;width:100%;text-align:left;
-        padding:9px 11px;background:none;border:none;
-        color:var(--text-1);font-size:12.5px;font-weight:500;font-family:var(--sans);
-        border-radius:var(--radius-sm);cursor:pointer;transition:background .12s;white-space:nowrap;
+        display:flex;align-items:center;gap:10px;width:100%;text-align:left;min-height:42px;padding:0 12px;
+        background:none;border:none;color:var(--text-1);font-size:14px;border-radius:10px;cursor:pointer;white-space:nowrap;
     }
     .menu-item:hover{background:var(--bg-hover)}
-    .menu-danger{color:var(--red)}
+    .menu-danger{color:var(--red-soft)}
     .menu-danger:hover{background:var(--red-dim)}
-    .menu-sep{height:1px;background:var(--border);margin:5px 4px}
+    .menu-sep{height:1px;background:var(--border);margin:6px 4px}
+
+    /* ── Rail + main ────────────────────────────────────────── */
+    .shell{display:flex;flex-wrap:wrap;flex:1 1 auto;align-items:stretch}
+    .side-nav{
+        flex:1 1 200px;max-width:240px;padding:20px 14px;border-right:1px solid var(--border);
+        display:flex;flex-direction:column;gap:4px;
+    }
+    .nav-item{
+        display:flex;align-items:center;gap:12px;width:100%;min-height:44px;padding:0 14px;
+        border:none;border-radius:12px;background:none;color:var(--text-2);font-size:15px;font-weight:500;
+        text-align:left;cursor:pointer;transition:background .15s,color .15s;
+    }
+    .nav-item:hover{background:var(--bg-hover);color:var(--text-1)}
+    .nav-item svg{flex:none;stroke:currentColor}
+    .nav-item.active{background:var(--bg-active);color:var(--text-1);font-weight:600;box-shadow:inset 0 0 0 1px var(--border-active)}
+    .nav-item.active svg{stroke:var(--cyan)}
+    .nav-badge{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:600;
+        color:var(--on-cyan);background:var(--cyan);border-radius:10px;padding:1px 8px}
+    .nav-badge.zero{background:var(--bg-hover);color:var(--text-3)}
+    .nav-card{
+        margin-top:18px;padding:14px;border-radius:var(--radius);border:1px solid var(--border);
+        background:var(--bg-sunk);display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--text-2);
+    }
+    .nav-card .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:0.14em;color:var(--text-3)}
+
+    .main{flex:999 1 560px;min-width:0;padding:24px clamp(16px,3vw,36px) 48px;display:flex;flex-direction:column;gap:20px}
+    .page-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px}
+    .page-head h1{font-size:28px;font-weight:700;letter-spacing:-0.01em}
+    .page-head p{color:var(--text-2);font-size:14px;margin-top:2px}
+
+    .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+    .stat{padding:16px 18px;border-radius:16px;border:1px solid var(--border);background:var(--bg-panel);display:flex;flex-direction:column;gap:6px}
+    .stat .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:0.14em;color:var(--text-3)}
+    .stat b{font-family:var(--mono);font-size:28px;font-weight:600;line-height:1.1}
+    .stat span{font-size:13px;color:var(--text-2)}
+    .stat.gold b{color:var(--gold)} .stat.cyan b{color:var(--cyan)}
 
     /* ── Message columns ────────────────────────────────────── */
-    .grid-container{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-    .section{
-        background:var(--bg-panel);border:1px solid var(--border);
-        border-radius:var(--radius-lg);overflow:hidden;
-    }
-    .section-header{
-        display:flex;align-items:center;gap:10px;
-        padding:14px 18px;border-bottom:1px solid var(--border);
-        background:rgba(255,255,255,0.015);
-    }
-    .section-title{font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-2)}
-    .count-badge{
-        background:var(--bg-card);border:1px solid var(--border);color:var(--text-2);
-        font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;font-family:var(--mono);
-    }
-    .sms-list{padding:12px;max-height:calc(100vh - 220px);overflow-y:auto}
+    .grid-container{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+    .section{background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+    .section-header{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
+    .section-title{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-2)}
+    .count-badge{background:var(--bg-hover);color:var(--text-2);font-size:12px;font-weight:600;padding:1px 9px;border-radius:10px;font-family:var(--mono);letter-spacing:0}
+    .sms-list{padding:14px;max-height:calc(100vh - 330px);min-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
     .sms-list::-webkit-scrollbar{width:8px}
-    .sms-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
-    .sms-list::-webkit-scrollbar-track{background:transparent}
+    .sms-list::-webkit-scrollbar-thumb{background:var(--border-h);border-radius:4px}
 
-    /* A card carries its state on the LEFT EDGE — pending is teal, used is
-       muted. Scannable down the column without reading any text. */
     .sms-card{
-        background:var(--bg-card);border:1px solid var(--border);
-        border-left:3px solid var(--teal);
-        border-radius:var(--radius);padding:13px 15px;margin-bottom:10px;
-        transition:border-color .15s,transform .15s,opacity .4s;
+        position:relative;background:#0F1830;border:1px solid #2A4B66;border-radius:16px;padding:16px 18px;
+        display:flex;flex-direction:column;gap:8px;transition:border-color .15s,opacity .4s,transform .4s;
     }
-    .sms-card:hover{border-color:var(--border-h);transform:translateX(2px)}
-    .sms-card.used{border-left-color:var(--text-3);opacity:.62}
+    .sms-card:hover{border-color:var(--cyan-line)}
+    .sms-card.used{background:var(--bg-sunk);border-color:var(--border)}
+    .sms-card.internal{border-color:var(--orange-line)}
     .sms-card.expiring{opacity:0;transform:translateX(-12px)}
-    .sms-sender{font-size:12px;font-weight:700;color:var(--teal);margin-bottom:6px;letter-spacing:-0.01em}
-    .sms-card.used .sms-sender{color:var(--text-2)}
-    .sms-message{font-size:13px;color:var(--text-1);line-height:1.55;word-break:break-word}
+    .sms-top{display:flex;align-items:flex-start;gap:12px}
+    .sms-sender{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:15px}
+    .sms-sender b{font-weight:700;color:var(--text-1);word-break:break-all}
+    .sms-sender .to{font-family:var(--mono);font-size:13px;color:var(--text-2)}
+    .sms-pill{flex:none;font-family:var(--mono);font-size:10.5px;letter-spacing:0.1em;font-weight:600;
+        padding:4px 10px;border-radius:9px;text-transform:uppercase;background:var(--cyan);color:var(--on-cyan);white-space:nowrap}
+    .sms-card.used .sms-pill{background:var(--bg-hover);color:var(--text-2)}
+    .sms-card.internal .sms-pill{background:#2B1D0E;color:var(--orange-soft)}
+    .sms-message{font-size:14px;color:#C3C8DF;line-height:1.55;word-break:break-word}
     .sms-code{
-        display:inline-flex;align-items:center;gap:8px;margin-top:10px;
-        font-family:var(--mono);font-size:19px;font-weight:700;letter-spacing:0.14em;
-        color:var(--teal);background:var(--teal-dim);border:1px solid var(--teal-line);
-        border-radius:var(--radius-sm);padding:7px 14px;transition:background .15s;
+        align-self:flex-start;display:inline-flex;align-items:center;gap:10px;
+        font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:0.1em;color:var(--gold);
+        background:var(--gold-dim);border:1px solid var(--gold-line);border-radius:12px;padding:6px 14px;
+        cursor:pointer;transition:background .15s;
     }
-    .sms-code:hover{background:rgba(0,212,170,0.2)}
-    .sms-code.used{color:var(--text-2);background:rgba(255,255,255,0.04);border-color:var(--border)}
-    .sms-time{font-size:11px;color:var(--text-3);margin-top:9px;font-family:var(--mono)}
-    .sms-lag{color:var(--amber)}
-    .sms-status{font-weight:600;color:var(--teal)}
+    .sms-code:hover{background:#2A2310}
+    .sms-code .copy-hint{font-family:var(--sans);font-size:11px;letter-spacing:0;color:var(--text-3);font-weight:500}
+    .sms-code.used{color:var(--text-4);background:var(--bg-hover);border-color:var(--border);font-size:20px}
+    .sms-time{font-size:12px;color:var(--text-3);font-family:var(--mono)}
+    .sms-lag{color:var(--orange-soft)}
+    .sms-status{color:var(--cyan-soft)}
     .sms-status.used{color:var(--text-3)}
-    .expiry-bar-wrap{height:3px;background:var(--border);border-radius:2px;margin-top:10px;overflow:hidden}
+    .expiry-bar-wrap{height:4px;background:#1C2140;border-radius:2px;overflow:hidden}
     .expiry-bar{height:100%;border-radius:2px;transition:width 1s linear,background .4s}
-    .expiry-countdown{font-size:10.5px;color:var(--text-3);margin-top:5px;font-family:var(--mono)}
-    .expiry-countdown.urgent{color:var(--red)}
-    .empty-state{text-align:center;padding:56px 20px;color:var(--text-3)}
-    .empty-state-icon{font-size:34px;margin-bottom:10px;opacity:.55}
+    .expiry-countdown{font-size:12px;color:var(--text-3);font-family:var(--mono)}
+    .expiry-countdown.urgent{color:var(--red-soft)}
+    .empty-state{text-align:center;padding:48px 20px;color:var(--text-3);display:flex;flex-direction:column;align-items:center;gap:10px}
+    .empty-state-icon{width:44px;height:44px;border-radius:14px;border:1px dashed var(--border-h);display:flex;align-items:center;justify-content:center;font-size:0}
+    .empty-state-icon::before{content:'';width:16px;height:12px;border:2px solid var(--text-4);border-radius:3px}
 
-    /* ── Modals ─────────────────────────────────────────────── */
+    /* ── Side panels (the old modals) ───────────────────────── */
     .config-overlay{
-        display:none;position:fixed;inset:0;background:rgba(4,7,14,0.72);
-        backdrop-filter:blur(3px);z-index:900;
-        justify-content:center;align-items:flex-start;padding:40px 20px;overflow-y:auto;
+        display:none;position:fixed;inset:0;background:rgba(4,6,12,0.68);backdrop-filter:blur(3px);
+        z-index:900;justify-content:flex-end;
     }
     .config-overlay.open{display:flex}
     .config-modal{
-        width:100%;max-width:680px;background:var(--bg-panel);
-        border:1px solid var(--border-h);border-radius:var(--radius-lg);
-        padding:26px;box-shadow:var(--shadow);
+        width:min(760px,100%);height:100%;overflow-y:auto;background:var(--bg-panel);
+        border-left:1px solid var(--border-h);padding:26px clamp(16px,3vw,32px) 40px;box-shadow:var(--shadow);
+        animation:slidein .22s ease-out;
     }
+    .config-modal.wide{width:min(1120px,100%)}
+    @keyframes slidein{from{transform:translateX(24px);opacity:.4}to{transform:none;opacity:1}}
     .config-modal h3{
-        display:flex;align-items:center;justify-content:space-between;
-        font-size:17px;font-weight:700;margin-bottom:22px;letter-spacing:-0.02em;
+        position:sticky;top:-26px;z-index:2;margin:-26px calc(-1 * clamp(16px,3vw,32px)) 20px;
+        padding:20px clamp(16px,3vw,32px);background:rgba(14,18,34,0.96);backdrop-filter:blur(8px);
+        border-bottom:1px solid var(--border);
+        display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:22px;font-weight:700;letter-spacing:-0.01em;
     }
     .config-close{
-        background:none;border:none;color:var(--text-3);font-size:20px;
-        cursor:pointer;line-height:1;padding:2px 6px;border-radius:6px;transition:all .15s;
+        width:40px;height:40px;flex:none;background:var(--bg-sunk);border:1px solid var(--border-h);border-radius:12px;
+        color:var(--text-2);font-size:18px;cursor:pointer;line-height:1;
     }
-    .config-close:hover{color:var(--text-1);background:var(--bg-card)}
-    .config-section{margin-bottom:26px}
+    .config-close:hover{color:var(--text-1);border-color:var(--cyan-line)}
+    .config-section{margin-bottom:28px}
     .config-section h4{
-        font-size:10.5px;font-weight:700;color:var(--text-2);text-transform:uppercase;
-        letter-spacing:0.1em;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);
-        /* flex so the count badge sits on the baseline instead of stretching
-           the heading's line box and pushing the rule below it out of line. */
-        display:flex;align-items:center;
+        display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;font-weight:600;
+        color:var(--text-2);text-transform:uppercase;letter-spacing:0.14em;margin-bottom:12px;
+        padding-bottom:10px;border-bottom:1px solid var(--border);
     }
     .config-row{
-        display:flex;align-items:center;gap:10px;padding:9px 11px;margin-bottom:6px;
-        background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);
+        display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:8px;
+        background:var(--bg-sunk);border:1px solid var(--border);border-radius:var(--radius-sm);
     }
-    .pattern-text{flex:1;font-family:var(--mono);font-size:12px;color:var(--text-1);word-break:break-all}
-    .phone-label{font-family:var(--mono);font-size:11.5px;color:var(--teal);min-width:88px}
-    .del-btn{
-        background:none;border:none;color:var(--text-3);cursor:pointer;font-size:14px;
-        padding:2px 6px;border-radius:6px;transition:all .15s;
-    }
-    .del-btn:hover{color:var(--red);background:var(--red-dim)}
-    .config-add{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+    .pattern-text{flex:1;font-family:var(--mono);font-size:13px;color:var(--text-1);word-break:break-all}
+    .phone-label{font-family:var(--mono);font-size:12.5px;color:var(--cyan-soft);min-width:96px}
+    .del-btn{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:15px;width:32px;height:32px;border-radius:8px}
+    .del-btn:hover{color:var(--red-soft);background:var(--red-dim)}
+    .config-add{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
     .config-add input,.config-add select{
-        flex:1;min-width:130px;padding:9px 12px;background:var(--bg-card);
-        border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-1);
-        font-family:var(--mono);font-size:12px;outline:none;transition:border-color .15s;
+        flex:1;min-width:140px;height:42px;padding:0 12px;background:var(--bg-sunk);
+        border:1px solid var(--border-h);border-radius:12px;color:var(--text-1);
+        font-family:var(--mono);font-size:13px;outline:none;
     }
-    .config-add input:focus,.config-add select:focus{border-color:var(--teal-line)}
-    .config-add input::placeholder{color:var(--text-3)}
+    .config-add input:focus,.config-add select:focus{border-color:var(--cyan)}
+    .config-add input::placeholder{color:var(--text-4)}
     .config-add button{
-        padding:9px 16px;background:var(--teal-dim);border:1px solid var(--teal-line);
-        border-radius:var(--radius-sm);color:var(--teal);font-weight:700;font-size:12px;
-        cursor:pointer;transition:background .15s;white-space:nowrap;font-family:var(--sans);
+        height:42px;padding:0 16px;background:var(--cyan-dim);border:1px solid var(--cyan-line);border-radius:12px;
+        color:var(--cyan-soft);font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap;
     }
-    .config-add button:hover{background:rgba(0,212,170,0.2)}
+    .config-add button:hover{background:#123447}
     .setting-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0}
-    .setting-row label{font-size:13px;color:var(--text-2)}
-    .setting-row input{
-        width:110px;padding:9px 12px;background:var(--bg-card);border:1px solid var(--border);
-        border-radius:var(--radius-sm);color:var(--text-1);font-family:var(--mono);
-        font-size:12.5px;outline:none;
-    }
+    .setting-row label{font-size:14px;color:var(--text-2)}
+    .setting-row input{width:120px;height:42px;padding:0 12px;background:var(--bg-sunk);border:1px solid var(--border-h);
+        border-radius:12px;color:var(--text-1);font-family:var(--mono);font-size:14px;outline:none}
     .save-config-btn{
-        width:100%;padding:12px;background:var(--teal);border:none;border-radius:var(--radius-sm);
-        color:#04231c;font-weight:700;font-size:13.5px;cursor:pointer;transition:opacity .15s;
-        font-family:var(--sans);
+        width:100%;height:48px;background:var(--cyan);border:none;border-radius:12px;color:var(--on-cyan);
+        font-weight:700;font-size:15px;cursor:pointer;
     }
-    .save-config-btn:hover{opacity:.9}
-
-    /* Status blocks — FCM health, config storage, history totals. */
-    .fcm-status{font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--text-2);word-break:break-word}
-    .fcm-status .fcm-ok{color:var(--teal)}
-    .fcm-status .fcm-bad{color:var(--red)}
+    .save-config-btn:hover{filter:brightness(1.08)}
+    .fcm-status{font-family:var(--mono);font-size:12.5px;line-height:1.8;color:var(--text-2);word-break:break-word}
+    .fcm-status .fcm-ok{color:var(--cyan)}
+    .fcm-status .fcm-bad{color:var(--red-soft)}
     .fcm-status .fcm-idle{color:var(--text-3)}
     .config-error{
-        display:none;margin:0 0 14px;padding:12px 14px;background:var(--red-dim);
-        border:1px solid var(--red-line);border-radius:var(--radius-sm);color:var(--red);
-        font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;font-family:var(--mono);
+        display:none;margin:0 0 16px;padding:12px 14px;background:var(--red-dim);border:1px solid var(--red-line);
+        border-radius:12px;color:var(--red-soft);font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;
     }
     .config-error.show{display:block}
 
-    /* ── Users, devices, history rows ───────────────────────── */
-    .admin-row{
-        display:flex;gap:8px;align-items:center;padding:10px 11px;margin-bottom:6px;
-        background:var(--bg-card);border:1px solid var(--border);
-        border-radius:var(--radius-sm);font-size:13px;flex-wrap:wrap;
-    }
+    /* ── Users & devices ────────────────────────────────────── */
+    .admin-row{display:flex;gap:10px;align-items:center;padding:10px 12px;margin-bottom:8px;background:var(--bg-sunk);
+        border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;flex-wrap:wrap}
     .admin-row .grow{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .admin-row .mono{font-family:var(--mono);font-size:11px;color:var(--text-3)}
-    .admin-row button,.admin-row select{
-        padding:5px 10px;font-size:11.5px;border-radius:6px;background:var(--bg-panel);
-        border:1px solid var(--border);color:var(--text-1);cursor:pointer;
-        font-family:var(--sans);transition:border-color .15s;
-    }
-    .admin-row button:hover{border-color:var(--teal-line);color:var(--teal)}
-    .pill{font-size:10.5px;padding:3px 9px;border-radius:20px;font-family:var(--mono);font-weight:600}
-    .pill-ok{background:var(--teal-dim);color:var(--teal)}
-    .pill-off{background:var(--red-dim);color:var(--red)}
-    .pill-idle{background:rgba(255,255,255,0.05);color:var(--text-3)}
-    .pill-warn{background:var(--amber-dim);color:var(--amber)}
-
-    /* ── Users & devices: cards, not rows ────────────────────────
-       .admin-row packed an identity, three or four state pills and up to four
-       controls into ONE flex line that then wrapped. At a real fleet size that
-       is a wall of text where nothing is findable: the name, the status and the
-       buttons all have the same weight, and two adjacent rows are told apart
-       only by reading them.
-
-       A card gives each row a shape instead. Identity top-left where the eye
-       starts, state top-right, controls on their own line below a hairline so a
-       destructive button is never adjacent to a name. The left edge carries the
-       state as COLOUR, which is what makes a deactivated user or an offline
-       phone findable in a list without reading a word of it — the same trick
-       the SMS cards already use. */
-    .a-card{
-        position:relative;background:var(--bg-card);border:1px solid var(--border);
-        border-left:3px solid var(--border-h);
-        border-radius:var(--radius);padding:12px 14px;margin-bottom:8px;
-        transition:border-color .15s,background .15s;
-    }
-    .a-card:hover{background:var(--bg-hover);border-color:var(--border-h)}
-    .a-card.is-ok{border-left-color:var(--teal)}
-    .a-card.is-warn{border-left-color:var(--amber)}
-    .a-card.is-off{border-left-color:var(--red)}
-    .a-card.is-idle{border-left-color:var(--text-3)}
-
-    .a-head{display:flex;gap:11px;align-items:center}
-
-    /* The initial, in a ring tinted by state. Cheap to render, and it is what
-       lets you find a known name by shape before you have read anything. */
-    .a-avatar{
-        flex:none;width:34px;height:34px;border-radius:50%;
-        display:flex;align-items:center;justify-content:center;
-        font-family:var(--mono);font-size:14px;font-weight:700;
-        background:rgba(255,255,255,0.04);border:1px solid var(--border-h);
-        color:var(--text-2);text-transform:uppercase;
-    }
-    .a-card.is-ok   .a-avatar{background:var(--teal-dim);border-color:var(--teal-line);color:var(--teal)}
-    .a-card.is-warn .a-avatar{background:var(--amber-dim);border-color:rgba(245,181,68,0.32);color:var(--amber)}
-    .a-card.is-off  .a-avatar{background:var(--red-dim);border-color:var(--red-line);color:var(--red)}
-
+    .admin-row .mono{font-size:12px;color:var(--text-3)}
+    .admin-row button,.admin-row select{height:34px;padding:0 10px;font-size:13px;border-radius:9px;background:var(--bg-panel);
+        border:1px solid var(--border-h);color:var(--text-1);cursor:pointer}
+    .pill{font-size:10.5px;padding:3px 9px;border-radius:9px;font-family:var(--mono);font-weight:600;letter-spacing:0.06em;white-space:nowrap}
+    .pill-ok{background:var(--cyan);color:var(--on-cyan)}
+    .pill-off{background:var(--red-dim);color:var(--red-soft)}
+    .pill-idle{background:var(--bg-hover);color:var(--text-2)}
+    .pill-warn{background:var(--orange);color:#1A0F02}
+    .a-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+    .a-card{position:relative;background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:16px;
+        display:flex;flex-direction:column;gap:12px;transition:border-color .15s}
+    .a-card:hover{border-color:var(--border-h)}
+    .a-card.is-ok{border-color:#1F2A4A}
+    .a-card.is-warn{border-color:var(--orange-line)}
+    .a-card.is-off{border-color:var(--red-line)}
+    .a-card.is-idle{opacity:.92}
+    .a-head{display:flex;gap:12px;align-items:center}
+    .a-avatar{flex:none;width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+        font-weight:700;font-size:16px;background:var(--bg-active);border:1px solid var(--border-active);color:var(--cyan-soft);text-transform:uppercase}
+    .a-card.is-warn .a-avatar{background:var(--orange-dim);border-color:var(--orange-line);color:var(--orange-soft)}
+    .a-card.is-off .a-avatar{background:var(--red-dim);border-color:var(--red-line);color:var(--red-soft)}
     .a-ident{flex:1;min-width:0}
-    .a-name{
-        font-size:13.5px;font-weight:650;color:var(--text-1);
-        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    }
-    .a-sub{
-        font-family:var(--mono);font-size:10.5px;color:var(--text-3);margin-top:2px;
-        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    }
-    .a-tags{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;flex:none;max-width:55%}
-
-    /* Controls below a hairline. The separation is the point: a Purge button
-       sitting on the same line as a name is one mis-click from a hard delete. */
-    .a-foot{
-        display:flex;gap:7px;align-items:center;flex-wrap:wrap;
-        margin-top:11px;padding-top:10px;border-top:1px solid var(--border);
-    }
+    .a-name{font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .a-sub{font-family:var(--mono);font-size:11.5px;color:var(--text-3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .a-tags{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex:none;max-width:55%}
+    .a-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border)}
     .a-foot .spacer{flex:1}
-    .a-btn{
-        padding:5px 11px;font-size:11.5px;font-weight:600;border-radius:7px;
-        background:var(--bg-panel);border:1px solid var(--border);
-        color:var(--text-2);cursor:pointer;font-family:var(--sans);
-        transition:border-color .15s,color .15s,background .15s;
-    }
-    .a-btn:hover{border-color:var(--teal-line);color:var(--teal);background:var(--bg-card)}
-    /* Destructive actions look destructive BEFORE they are hovered. Purge has no
-       undo and Remove is a standing block; neither should read as one more
-       neutral button in a row of four. */
-    .a-btn.danger{color:var(--red);border-color:rgba(248,113,113,0.22)}
-    .a-btn.danger:hover{background:var(--red-dim);border-color:var(--red-line);color:var(--red)}
-    .a-btn.good:hover{border-color:var(--teal-line);color:var(--teal)}
+    .a-btn{height:36px;padding:0 12px;font-size:13px;font-weight:600;border-radius:10px;background:var(--bg-panel);
+        border:1px solid var(--border-h);color:var(--text-2);cursor:pointer;transition:border-color .15s,color .15s}
+    .a-btn:hover{border-color:var(--cyan-line);color:var(--text-1)}
+    .a-btn.danger{color:var(--red-soft);border-color:var(--red-line)}
+    .a-btn.danger:hover{background:var(--red-dim)}
+    .a-btn.good{color:var(--cyan-soft);border-color:var(--cyan-line)}
+    .a-field{display:flex;align-items:center;gap:8px}
+    .a-field > label{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3);white-space:nowrap}
+    .a-input,.a-select{height:36px;padding:0 10px;font-size:13px;border-radius:10px;background:var(--bg-sunk);
+        border:1px solid var(--border-h);color:var(--text-1);max-width:170px}
+    .a-input{font-family:var(--mono);width:130px}
+    .a-input::placeholder{color:var(--text-4);font-family:var(--sans)}
+    .a-input:focus,.a-select:focus{outline:none;border-color:var(--cyan)}
+    .a-input.needed{border-color:var(--orange-line);background:var(--orange-dim)}
+    .a-empty{padding:26px 14px;text-align:center;color:var(--text-3);font-size:14px;background:var(--bg-sunk);
+        border:1px dashed var(--border-h);border-radius:var(--radius);line-height:1.6;grid-column:1 / -1}
+    .a-empty .big{display:none}
+    .a-list > .code-box{grid-column:1 / -1;align-self:start;margin:0}
+    .a-count{margin-left:4px;font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 8px;border-radius:9px;background:var(--bg-hover);color:var(--text-2);letter-spacing:0}
+    .a-note{font-size:13px;color:var(--text-3);line-height:1.6;padding:10px 12px;border-radius:10px;background:var(--bg-sunk)}
+    .sim-rows{display:flex;flex-direction:column;gap:8px}
+    .sim-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:13px;color:var(--text-2);
+        padding:10px 12px;border-radius:12px;background:#0B1324;border:1px solid #1C2A48}
+    .sim-slot{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.12em;color:var(--text-3);min-width:46px}
+    .sim-num{font-family:var(--mono);font-size:14.5px;color:var(--text-1)}
+    .sim-src{font-size:12px;color:var(--text-3)}
+    .sim-row .warn{color:var(--orange-soft)}
+    .sim-row .bad{color:var(--red-soft)}
+    .sim-log{font-size:13px;color:var(--text-3)}
+    .sim-log summary{cursor:pointer;user-select:none;min-height:32px;display:flex;align-items:center}
+    .sim-log div{font-family:var(--mono);font-size:12px;line-height:1.8;padding-left:12px}
+    .code-box{font-family:var(--mono);font-size:16px;color:var(--gold);background:var(--gold-dim);border:1px dashed var(--gold-line);
+        border-radius:12px;padding:12px;margin:10px 0;text-align:center;letter-spacing:0.1em}
 
-    /* A labelled control, so a bare phone number in a box is not left to be
-       guessed at. */
-    .a-field{display:flex;align-items:center;gap:6px}
-    .a-field > label{
-        font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
-        color:var(--text-3);white-space:nowrap;
-    }
-    .a-input,.a-select{
-        padding:5px 9px;font-size:11.5px;border-radius:7px;background:var(--bg-panel);
-        border:1px solid var(--border);color:var(--text-1);font-family:var(--sans);
-        transition:border-color .15s;max-width:150px;
-    }
-    .a-input{font-family:var(--mono);width:118px}
-    .a-input::placeholder{color:var(--text-3);font-family:var(--sans)}
-    .a-input:focus,.a-select:focus{outline:none;border-color:var(--teal-line)}
-    /* An unset SIM number is not a blank optional field — it is the reason that
-       phone's OTPs cannot be fetched. It should look like something to do. */
-    .a-input.needed{border-color:rgba(245,181,68,0.32);background:var(--amber-dim)}
+    /* A switch for "may this user send SMS". */
+    .switch{width:52px;height:30px;flex:none;border-radius:15px;border:0;padding:3px;cursor:pointer;
+        background:var(--border-h);display:flex;justify-content:flex-start;transition:background .2s}
+    .switch::after{content:'';width:24px;height:24px;border-radius:12px;background:var(--text-1)}
+    .switch.on{background:var(--cyan);justify-content:flex-end}
+    .send-perm{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:12px;border-radius:12px;background:var(--bg-sunk)}
+    .send-perm .grow{flex:1 1 180px;display:flex;flex-direction:column;gap:2px}
+    .send-perm .grow b{font-size:14px}
+    .send-perm .grow span{font-size:12.5px;color:var(--text-3)}
 
-    .a-empty{
-        padding:22px 14px;text-align:center;color:var(--text-3);font-size:12.5px;
-        background:var(--bg-card);border:1px dashed var(--border-h);
-        border-radius:var(--radius);line-height:1.6;
-    }
-    .a-empty .big{display:block;font-size:22px;margin-bottom:7px;opacity:.55}
-
-    /* Count next to a section heading — "Devices" alone does not tell you
-       whether you are looking at everything. */
-    .a-count{
-        margin-left:7px;font-family:var(--mono);font-size:10.5px;font-weight:600;
-        padding:2px 7px;border-radius:20px;
-        background:rgba(255,255,255,0.05);color:var(--text-3);
-    }
-    .a-note{
-        font-size:11.5px;color:var(--text-3);line-height:1.6;margin-top:9px;
-        padding-left:11px;border-left:2px solid var(--border);
-    }
-    /* SIM 1 / SIM 2 as the phone reports them (4.40.0). */
-    .sim-rows{margin-top:10px;display:flex;flex-direction:column;gap:5px}
-    .sim-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:var(--text-2)}
-    .sim-slot{font-family:var(--mono);font-size:10.5px;font-weight:600;color:var(--text-3);
-              min-width:42px}
-    .sim-num{font-family:var(--mono);font-size:12.5px;color:var(--text)}
-    .sim-src{font-size:10.5px;color:var(--text-3)}
-    .sim-row .warn{color:var(--amber)}
-    .sim-row .bad{color:var(--red)}
-    .sim-log{margin-top:8px;font-size:11.5px;color:var(--text-3)}
-    .sim-log summary{cursor:pointer;user-select:none}
-    .sim-log div{font-family:var(--mono);font-size:11px;line-height:1.7;padding-left:12px}
-    .code-box{
-        font-family:var(--mono);font-size:15px;color:var(--teal);background:var(--teal-dim);
-        border:1px dashed var(--teal-line);border-radius:var(--radius-sm);
-        padding:12px;margin:10px 0;text-align:center;letter-spacing:0.1em;
-    }
-    .strip{display:flex;gap:2px;align-items:flex-end;height:64px;margin:8px 0 14px}
-    .strip div{
-        flex:1;min-width:2px;background:var(--teal);opacity:.6;
-        border-radius:3px 3px 0 0;cursor:pointer;transition:opacity .12s;
-    }
+    /* ── History ─────────────────────────────────────────────── */
+    .strip{display:flex;gap:2px;align-items:flex-end;height:72px;margin:8px 0 14px}
+    .strip div{flex:1;min-width:2px;background:var(--cyan);opacity:.65;border-radius:3px 3px 0 0;cursor:pointer}
     .strip div:hover{opacity:1}
-    /* Empty state: not a bar, and not shaped like one. */
-    .strip.strip-empty{
-        align-items:center;justify-content:center;color:var(--text-3);
-        font-family:var(--mono);font-size:11.5px;
-        border:1px dashed var(--border);border-radius:var(--radius-sm);
-    }
-    .hist-row{
-        display:flex;gap:10px;align-items:baseline;padding:10px 11px;margin-bottom:5px;
-        background:var(--bg-card);border:1px solid var(--border);
-        border-radius:var(--radius-sm);font-size:12.5px;
-    }
-    .hist-row .mono{font-family:var(--mono);font-size:11px;color:var(--text-3)}
-    .hist-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
-    .hist-check{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);cursor:pointer;user-select:none}
-    .hist-check input{width:14px;height:14px;accent-color:var(--teal);cursor:pointer}
-    .hist-danger{color:var(--red);border-color:var(--red-line);background:var(--red-dim)}
-    .hist-danger:hover:not(:disabled){background:rgba(248,113,113,0.18)}
-    .hist-danger:disabled{opacity:.4;cursor:default;color:var(--text-3);border-color:var(--border);background:var(--bg-card)}
-    .hist-row.sel{border-color:var(--teal-line);background:rgba(0,212,170,0.05)}
-    /* The row truncates — the whole message is the thing you actually came to
-       read, so the row has to be a way in rather than the final answer. */
-    .hist-row{cursor:pointer;transition:border-color .12s,background .12s}
+    .strip.strip-empty{align-items:center;justify-content:center;color:var(--text-3);font-family:var(--mono);font-size:12px;
+        border:1px dashed var(--border-h);border-radius:12px}
+    .hist-row{display:flex;gap:10px;align-items:baseline;padding:11px 12px;margin-bottom:6px;background:var(--bg-sunk);
+        border:1px solid var(--border);border-radius:12px;font-size:13.5px;cursor:pointer}
     .hist-row:hover{border-color:var(--border-h);background:var(--bg-hover)}
+    .hist-row .mono{font-size:12px;color:var(--text-3)}
+    .hist-row.sel{border-color:var(--cyan-line);background:#0D1C2A}
     .hist-row .hist-cb{cursor:pointer}
-
-    /* ── One message, in full ────────────────────────────────────
-       z-index ABOVE .config-overlay (900): this opens on top of the History
-       modal, which is still open behind it. Closing it must return you to the
-       list exactly where you were, so History is never dismissed. */
-    .msg-overlay{
-        display:none;position:fixed;inset:0;background:rgba(4,7,14,0.78);
-        backdrop-filter:blur(4px);z-index:1000;
-        justify-content:center;align-items:center;padding:24px;
-    }
-    .msg-overlay.open{display:flex}
-    .msg-modal{
-        width:100%;max-width:520px;max-height:82vh;overflow-y:auto;
-        background:var(--bg-panel);border:1px solid var(--border-h);
-        border-radius:var(--radius-lg);padding:22px;box-shadow:var(--shadow);
-    }
-    .msg-modal h3{
-        display:flex;align-items:center;justify-content:space-between;gap:12px;
-        font-size:15px;font-weight:700;margin-bottom:16px;letter-spacing:-0.02em;
-    }
-    .msg-meta{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:12px;margin-bottom:16px}
-    .msg-meta dt{
-        font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
-        color:var(--text-3);white-space:nowrap;padding-top:2px;
-    }
-    .msg-meta dd{color:var(--text-1);word-break:break-word}
-    .msg-meta dd .mono{font-family:var(--mono);font-size:11.5px;color:var(--text-2)}
-    /* The full body, wrapped and selectable. white-space:pre-wrap keeps the
-       carrier's own line breaks — an OTP is often on its own line and losing
-       that makes a long message much harder to scan. */
-    .msg-body{
-        font-family:var(--mono);font-size:12.5px;line-height:1.7;color:var(--text-1);
-        background:var(--bg-card);border:1px solid var(--border);
-        border-radius:var(--radius-sm);padding:13px 14px;
-        white-space:pre-wrap;word-break:break-word;user-select:text;max-height:38vh;overflow-y:auto;
-    }
-    .msg-code{
-        font-family:var(--mono);font-size:20px;font-weight:700;color:var(--teal);
-        background:var(--teal-dim);border:1px dashed var(--teal-line);
-        border-radius:var(--radius-sm);padding:9px 14px;margin-bottom:14px;
-        text-align:center;letter-spacing:.12em;cursor:pointer;user-select:all;
-    }
-    .msg-code:hover{background:rgba(0,212,170,0.18)}
-    .msg-code.none{color:var(--text-3);background:rgba(255,255,255,0.03);
-        border-color:var(--border);font-size:13px;letter-spacing:0;cursor:default;font-weight:600}
-    .msg-actions{display:flex;gap:8px;margin-top:14px}
     .hist-row .msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
+    .hist-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0 4px}
+    .hist-check{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer;user-select:none}
+    .hist-check input{width:16px;height:16px;accent-color:var(--cyan);cursor:pointer}
+    .hist-danger{color:var(--red-soft);border-color:var(--red-line);background:var(--red-dim)}
+    .hist-danger:disabled{opacity:.4}
+
+    .msg-overlay{display:none;position:fixed;inset:0;background:rgba(4,6,12,0.78);backdrop-filter:blur(4px);z-index:1000;
+        justify-content:center;align-items:center;padding:24px}
+    .msg-overlay.open{display:flex}
+    .msg-modal{width:100%;max-width:560px;max-height:84vh;overflow-y:auto;background:var(--bg-panel);
+        border:1px solid var(--border-h);border-radius:var(--radius-lg);padding:24px;box-shadow:var(--shadow)}
+    .msg-modal h3{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:18px;font-weight:700;margin-bottom:16px}
+    .msg-meta{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13.5px;margin-bottom:16px}
+    .msg-meta dt{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3);white-space:nowrap;padding-top:3px}
+    .msg-meta dd{color:var(--text-1);word-break:break-word}
+    .msg-meta dd .mono{font-size:12.5px;color:var(--text-2)}
+    .msg-body{font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--text-1);background:var(--bg-sunk);border:1px solid var(--border);
+        border-radius:12px;padding:14px;white-space:pre-wrap;word-break:break-word;user-select:text;max-height:38vh;overflow-y:auto}
+    .msg-code{font-family:var(--mono);font-size:24px;font-weight:600;color:var(--gold);background:var(--gold-dim);border:1px dashed var(--gold-line);
+        border-radius:12px;padding:10px 14px;margin-bottom:14px;text-align:center;letter-spacing:.12em;cursor:pointer;user-select:all}
+    .msg-code.none{color:var(--text-3);background:var(--bg-sunk);border-color:var(--border);font-size:14px;letter-spacing:0;cursor:default;font-weight:600}
+    .msg-actions{display:flex;gap:8px;margin-top:14px}
+
+    /* ── Send SMS ───────────────────────────────────────────── */
+    .send-layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:22px;align-items:start}
+    .step{padding:20px;border-radius:18px;border:1px solid var(--border);background:var(--bg-card);display:flex;flex-direction:column;gap:14px;margin-bottom:16px}
+    .step-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .step-n{width:28px;height:28px;border-radius:14px;background:var(--cyan-dim);color:var(--cyan);font-family:var(--mono);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center}
+    .step-head h4{font-size:17px;font-weight:600}
+    .step-hint{margin-left:auto;font-size:12.5px;color:var(--text-3)}
+    .sender-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+    .sender{text-align:left;min-height:80px;padding:12px 14px;border-radius:14px;border:1px solid var(--border);background:var(--bg-sunk);
+        color:var(--text-1);cursor:pointer;display:flex;flex-direction:column;gap:4px;transition:border-color .15s,background .15s}
+    .sender:hover:not(:disabled){border-color:var(--border-h)}
+    .sender.on{border-color:var(--cyan);background:var(--cyan-dim)}
+    .sender:disabled{cursor:not-allowed;opacity:.55}
+    .sender .t{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;width:100%}
+    .sender .t i{margin-left:auto;width:8px;height:8px;border-radius:4px;background:var(--cyan);flex:none}
+    .sender .t i.off{background:#4A5070} .sender .t i.warn{background:var(--orange)}
+    .sender .n{font-family:var(--mono);font-size:15px}
+    .sender .r{font-size:12px;color:var(--text-3)}
+    .sender .r.warn{color:var(--orange-soft)}
+    .field-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+    .field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--text-2);flex:1 1 260px}
+    .field input,.field textarea{background:var(--bg-sunk);border:1px solid var(--border-h);border-radius:12px;color:var(--text-1);outline:none}
+    .field input{height:44px;padding:0 14px;font-family:var(--mono);font-size:14px}
+    .field textarea{min-height:130px;padding:14px;font-size:15px;line-height:1.5;resize:vertical}
+    .field input:focus,.field textarea:focus{border-color:var(--cyan)}
+    .field input::placeholder,.field textarea::placeholder{color:var(--text-4)}
+    .user-chip{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px 0 6px;border-radius:20px;border:1px solid var(--border-h);
+        background:var(--bg-panel);color:var(--text-1);font-size:13.5px;font-weight:600;cursor:pointer}
+    .user-chip:hover{border-color:var(--cyan-line)}
+    .user-chip .av{width:28px;height:28px;border-radius:14px;background:#1B2347;color:var(--cyan-soft);display:flex;align-items:center;justify-content:center;text-transform:uppercase}
+    .user-chip .c{font-weight:400;color:var(--text-3)}
+    .chips{display:flex;flex-wrap:wrap;gap:8px;min-height:52px;padding:10px;border-radius:14px;border:1px dashed var(--border-h);background:var(--bg-sunk)}
+    .chips .empty{font-size:13px;color:var(--text-4);align-self:center;padding:0 6px}
+    .chip{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 4px 0 12px;border-radius:17px;background:#13213A;border:1px solid var(--cyan-line);font-size:13px}
+    .chip .num{font-family:var(--mono)}
+    .chip .lbl{color:var(--cyan-soft);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .chip button{width:26px;height:26px;border-radius:13px;border:0;background:#1E2E4D;color:var(--text-2);cursor:pointer}
+    .chip button:hover{color:var(--text-1);background:#28406A}
+    .meter{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+    .meter i{width:54px;height:6px;border-radius:3px;background:#1C2140}
+    .meter i.on{background:var(--cyan)} .meter i.over{background:var(--red)}
+    .meter span{font-family:var(--mono);font-size:13px;color:var(--text-2)}
+    .meter span.over{color:var(--red-soft)}
+    .send-bar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:18px 20px;border-radius:18px;border:1px solid var(--cyan-line);background:#0D1A2B;margin-bottom:16px}
+    .send-bar .grow{flex:1 1 260px;display:flex;flex-direction:column;gap:4px}
+    .send-bar .grow b{font-size:15px}
+    .send-bar .grow span{font-size:13px;color:var(--text-2)}
+    .send-bar .primary-btn{height:48px;padding:0 26px;font-size:16px}
+    .note-warn{font-size:13px;color:var(--orange-soft)}
+    .quota{padding:12px 14px;border-radius:12px;background:#111A2E;display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--text-2)}
+    .quota b{color:var(--text-1)}
+    .quota .bar{height:6px;border-radius:3px;background:#1C2140;overflow:hidden}
+    .quota .bar i{display:block;height:100%;background:var(--cyan);border-radius:3px}
+    .outbox{display:flex;flex-direction:column;gap:10px}
+    .ob{padding:12px 14px;border-radius:14px;border:1px solid #1C2140;background:var(--bg-card);display:flex;flex-direction:column;gap:6px}
+    .ob .h{display:flex;align-items:center;gap:8px}
+    .ob .to{font-family:var(--mono);font-size:14px}
+    .ob .lbl{font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+    .ob .st{margin-left:auto;flex:none;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;font-weight:600;padding:3px 9px;border-radius:9px;text-transform:uppercase}
+    .st-queued{background:var(--bg-hover);color:var(--text-2)}
+    .st-dispatched,.st-sending{background:var(--gold-dim);color:var(--gold)}
+    .st-sent{background:var(--cyan-dim);color:var(--cyan-soft)}
+    .st-delivered{background:var(--cyan);color:var(--on-cyan)}
+    .st-failed,.st-undelivered{background:#3A1418;color:var(--red-soft)}
+    .st-unknown,.st-expired{background:var(--orange-dim);color:var(--orange-soft)}
+    .st-cancelled{background:var(--bg-hover);color:var(--text-4)}
+    .ob .m{font-size:13px;color:#C3C8DF;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .ob .meta{font-size:12px;color:var(--text-3)}
+    .ob .meta.err{color:var(--red-soft)}
+    .ob .a-btn{align-self:flex-start;height:30px}
 
     /* ── Toast ──────────────────────────────────────────────── */
     .notification{
-        position:fixed;top:20px;right:20px;background:var(--bg-panel);
-        border:1px solid var(--border-h);color:var(--text-1);padding:13px 18px;
-        border-radius:var(--radius);box-shadow:var(--shadow);
-        transform:translateY(-12px);opacity:0;
-        transition:all .28s cubic-bezier(0.34,1.56,0.64,1);
-        z-index:1000;font-size:13.5px;font-weight:500;max-width:340px;
-        /* AN INVISIBLE ELEMENT STILL CAPTURES THE POINTER.
-           This sits fixed at top-right, z-index 1000, opacity 0 — directly over
-           the ⚙ at the right-hand end of the top bar, and above it. So the
-           cursor never became a hand and clicks landed on a toast nobody could
-           see. Intermittent only because whether they overlap depends on the
-           window width: .dashboard is max-width 1600px and centred, so on a wide
-           window the gear sits clear of the toast and on a narrower one it does
-           not. A toast is never clicked; it has no business intercepting one. */
+        position:fixed;bottom:24px;right:24px;background:var(--bg-panel);border:1px solid var(--cyan-line);color:var(--text-1);
+        padding:14px 18px;border-radius:14px;box-shadow:var(--shadow);transform:translateY(12px);opacity:0;
+        transition:all .25s cubic-bezier(0.34,1.56,0.64,1);z-index:1100;font-size:14px;font-weight:500;max-width:380px;
+        /* An invisible toast must never catch a click meant for what is under it. */
         pointer-events:none;
     }
     .notification.show{transform:translateY(0);opacity:1}
 
-    /* ── Responsive ─────────────────────────────────────────── */
-    @media (max-width:1100px){
-        .grid-container{grid-template-columns:1fr}
+    /* ── Wide screens: the rail stays usable while a panel is open ──
+       Panels open BESIDE the rail rather than over it, and the rail sits above
+       the backdrop, so moving from Send SMS to Devices is one click — not
+       close-then-open. Below this width the panel takes the screen and ✕ or
+       Escape returns to it. */
+    @media (min-width:1100px){
+        .side-nav{position:sticky;top:0;align-self:flex-start;min-height:calc(100vh - 66px);z-index:950;background:var(--bg)}
+        .config-modal{max-width:calc(100% - 240px)}
+    }
+
+    /* ── Narrow screens ─────────────────────────────────────── */
+    @media (max-width:1180px){
+        .grid-container{grid-template-columns:minmax(0,1fr)}
         .sms-list{max-height:none}
+        .send-layout{grid-template-columns:minmax(0,1fr)}
     }
-    @media (max-width:1200px){
-        .top-bar{flex-wrap:wrap}
-        .search-bar{flex:1 1 240px}
-        .bar-spacer{display:none}
-    }
-    @media (max-width:820px){
-        .dashboard{padding:12px}
-        .top-bar{position:static}
-        .search-bar{flex-basis:100%}
+    @media (max-width:860px){
+        .top-bar{position:static;padding:12px 16px}
+        .side-nav{max-width:none;flex-basis:100%;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--border);padding:10px 12px}
+        .nav-item{width:auto;flex:1 1 auto}
+        .nav-card{display:none}
+        .main{padding:18px 16px 40px}
         .whoami{display:none}
+        .load-banner{margin:12px 16px 0}
     }
 </style>
 </head>
@@ -626,18 +587,21 @@
     <!-- LOGIN -->
     <div id="loginScreen" class="login-container">
         <div class="login-box">
-            <h2><span>GetOTP</span> Dashboard</h2>
+            <div class="login-brand">
+                <svg width="42" height="42" viewBox="0 0 34 34" aria-hidden="true"><rect x="0.5" y="0.5" width="33" height="33" rx="9" fill="#141A33" stroke="#2B335C"></rect><path d="M17 6.5l8.5 3.2v6.4c0 5.2-3.6 9.5-8.5 11.4-4.9-1.9-8.5-6.2-8.5-11.4V9.7z" fill="none" stroke="#F5B544" stroke-width="1.7" stroke-linejoin="round"></path><path d="M18.3 11l-4.2 6.3h3.2l-1.3 5.7 4.6-7h-3.3z" fill="#F5B544"></path></svg>
+                <h2>GetOTP<span>CONSOLE</span></h2>
+            </div>
             <!-- Username is OPTIONAL and blank means admin, which is exactly
                  how this screen behaved before users existed. -->
-            <input type="text" id="usernameInput" placeholder="Username (leave blank for admin)" autocomplete="username">
-            <input type="password" id="passwordInput" placeholder="Password" autocomplete="current-password">
-            <button onclick="doLogin()">Login</button>
+            <input type="text" id="usernameInput" placeholder="Username (leave blank for admin)" autocomplete="username" aria-label="Username">
+            <input type="password" id="passwordInput" placeholder="Password" autocomplete="current-password" aria-label="Password">
+            <button onclick="doLogin()">Sign in</button>
             <div id="loginError" class="error"></div>
-            <div id="enrollToggle" class="enroll-link" onclick="toggleEnroll()">First time? Set your password →</div>
+            <button type="button" id="enrollToggle" class="enroll-link" onclick="toggleEnroll()">First time? Set your password →</button>
             <div id="enrollBox" class="enroll-box">
-                <input type="text" id="enrollUser" placeholder="Username">
-                <input type="text" id="enrollCode" placeholder="Enrollment code (e.g. VUK5-X7DT)">
-                <input type="password" id="enrollPassword" placeholder="Choose a password (8+ characters)">
+                <input type="text" id="enrollUser" placeholder="Username" aria-label="Username">
+                <input type="text" id="enrollCode" placeholder="Enrollment code (e.g. VUK5-X7DT)" aria-label="Enrollment code">
+                <input type="password" id="enrollPassword" placeholder="Choose a password (8+ characters)" aria-label="New password">
                 <button onclick="doEnroll()">Set password</button>
                 <div id="enrollError" class="error"></div>
             </div>
@@ -646,170 +610,164 @@
 
     <!-- DASHBOARD -->
     <div id="dashboard" class="dashboard">
-        <!-- ═══════════════════════════════════════════════════════
-             TWO ROWS, GROUPED BY WHAT THINGS DO.
-
-             This was one row. Four controls were added to it over three
-             releases (Users & Devices, History, the target dropdown, the
-             override button) and it stopped being readable — the search box
-             overlapped Clear All and the whole thing ran off the edge.
-
-             Row 1: who and what state — identity, connection, the forwarding
-                    switch. Things you READ.
-             Row 2: search, and the buttons that DO something, with the target
-                    dropdown sitting next to the three commands it applies to
-                    rather than floating between unrelated controls.
-
-             Destructive actions (Clear All) are visually separated from the
-             rest, because they sat next to Clear Log and the two are one
-             mis-click apart with very different consequences.
-             ═══════════════════════════════════════════════════════ -->
-        <!-- ═══════════════════════════════════════════════════════
-             ONE LINE.
-
-             Two rows was the wrong answer to "too many controls" — the right
-             answer is fewer controls in front of you. So this is ranked by how
-             often a thing is actually touched:
-
-               ALWAYS VISIBLE  the forwarding switch (the one thing you look at
-                               first), search, and the two diagnostics you reach
-                               for when something is wrong — Test and Get latest.
-               IN THE MENU     Settings, Users, History, Clear Log, Clear All,
-                               Logout. Occasional, or destructive, or both.
-
-             Live + Connected were saying the same thing twice: a pulsing dot and
-             the word "Live" next to a status that already reads "Connected".
-             Now one pill, dot included, which is also the only place on this bar
-             that turns red.
-             ═══════════════════════════════════════════════════════ -->
-        <div class="top-bar">
-            <div class="logo"><span class="logo-icon">📱</span> GetOTP</div>
+        <!-- The bar holds what you READ at a glance (who you are, the connection,
+             the forwarding switch) and the three commands you reach for when
+             something is wrong. Everything else is in the rail or the menu. -->
+        <header class="top-bar">
+            <div class="logo">
+                <svg width="36" height="36" viewBox="0 0 34 34" aria-hidden="true"><rect x="0.5" y="0.5" width="33" height="33" rx="9" fill="#141A33" stroke="#2B335C"></rect><path d="M17 6.5l8.5 3.2v6.4c0 5.2-3.6 9.5-8.5 11.4-4.9-1.9-8.5-6.2-8.5-11.4V9.7z" fill="none" stroke="#F5B544" stroke-width="1.7" stroke-linejoin="round"></path><path d="M18.3 11l-4.2 6.3h3.2l-1.3 5.7 4.6-7h-3.3z" fill="#F5B544"></path></svg>
+                <div class="logo-word"><b>GetOTP</b><span>CONSOLE</span></div>
+            </div>
             <div id="connectionStatus" class="connection-status">Connecting…</div>
             <span id="whoami" class="whoami"></span>
 
-            <div class="search-bar">
-                <!-- The ✕ lives IN the box and only exists while there is
-                     something to clear. A separate Clear button was a permanent
-                     control for an occasional action, and it duplicated the
-                     dropdown's own "All Numbers" option. -->
-                <div class="search-wrap">
-                    <input type="text" id="searchInput" placeholder="🔍 Filter by number…" oninput="filterMessages()">
-                    <button id="searchClear" class="search-clear" onclick="clearSearch()" title="Clear" aria-label="Clear search">✕</button>
-                </div>
-                <select class="filter-dropdown" id="numberFilter" onchange="filterMessages()">
-                    <option value="">All Numbers</option>
-                </select>
-            </div>
-
             <div class="bar-spacer"></div>
 
-            <select class="filter-dropdown admin-only" id="commandTarget" title="Which phones Test and Get latest act on">
+            <select class="filter-dropdown admin-only" id="commandTarget" title="Which phones Test and Get latest act on" aria-label="Command target">
                 <option value="all">All users</option>
             </select>
-            <button class="tb-btn" id="testMsgBtn" onclick="sendTestMessage()" title="Send a test message to the selected phones">📡 Test</button>
-            <button class="tb-btn" id="fetchLatestBtn" onclick="fetchLatest()" title="Ask the phone to forward its newest SMS — use when a code never arrived">📥 Latest</button>
+            <button class="tb-btn" id="testMsgBtn" onclick="sendTestMessage()" title="Send a test message to the selected phones">Test</button>
+            <button class="tb-btn" id="fetchLatestBtn" onclick="fetchLatest()" title="Ask the phone to forward its newest SMS — use when a code never arrived">Get latest</button>
 
             <!-- A user sees forwarding state and their own override; the GLOBAL
-                 switch is admin-only, and /api/toggle enforces that. Showing it
-                 to a user was offering a button that could only ever 403. -->
+                 switch is admin-only, and /api/toggle enforces that. -->
             <button id="overrideBtn" class="tb-btn user-only" onclick="startOverride()" style="display:none"></button>
-            <button id="forwardToggleBtn" class="forward-toggle-btn disabled admin-only" onclick="toggleForwarding()" disabled>⏳ …</button>
+            <button id="forwardToggleBtn" class="forward-toggle-btn disabled admin-only" onclick="toggleForwarding()" disabled>…</button>
+
+            <button class="primary-btn" id="sendOpenBtn" onclick="openSend()" title="Send a real SMS from one of your phones">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8l11-5-4 11-2-4.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path></svg>Send SMS</button>
 
             <div class="menu-wrap">
-                <button class="tb-btn menu-btn" id="menuBtn" type="button" title="Menu" aria-label="Menu" aria-expanded="false" aria-haspopup="true">⚙</button>
+                <button class="tb-btn menu-btn" id="menuBtn" type="button" title="Menu" aria-label="Menu" aria-expanded="false" aria-haspopup="true">
+                    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="4" cy="9" r="1.6" fill="currentColor"></circle><circle cx="9" cy="9" r="1.6" fill="currentColor"></circle><circle cx="14" cy="9" r="1.6" fill="currentColor"></circle></svg></button>
                 <div id="barMenu" class="menu">
-                    <button class="menu-item admin-only" onclick="closeMenu();openConfig()">🔧 Filters</button>
-                    <button class="menu-item admin-only" onclick="closeMenu();openAdmin()">👥 Users</button>
-                    <button class="menu-item admin-only" onclick="closeMenu();openHistory()">🕘 History</button>
-                    <div class="menu-sep"></div>
-                    <button class="menu-item" id="clearLogBtn" onclick="closeMenu();clearForwardLog()">📋 Clear log</button>
+                    <button class="menu-item" id="clearLogBtn" onclick="closeMenu();clearForwardLog()">Clear phone log</button>
                     <div class="menu-sep"></div>
                     <!-- Destructive, and last, and the only red thing in here. -->
-                    <button class="menu-item menu-danger" onclick="closeMenu();clearAllMessages()">🗑️ Clear messages</button>
-                    <button class="menu-item" onclick="closeMenu();doLogout()">↩︎ Logout</button>
+                    <button class="menu-item menu-danger" onclick="closeMenu();clearAllMessages()">Clear all messages</button>
+                    <button class="menu-item" onclick="closeMenu();doLogout()">Sign out</button>
                 </div>
             </div>
-        </div>
+        </header>
         <!-- Impossible to miss. A failed Firestore load used to be visible only
              inside the Settings modal, so it looked exactly like the data had
              been deleted — four times. -->
         <div id="loadBanner" class="load-banner"></div>
 
-        <div class="grid-container">
-            <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Pending <span class="count-badge" id="pendingCount">0</span></div>
+        <div class="shell">
+            <nav class="side-nav" aria-label="Main">
+                <button class="nav-item active" data-nav="inbox" onclick="closeAllPanels()">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><rect x="2" y="3.5" width="14" height="11" rx="2.5"></rect><path d="M2.5 5l6.5 5 6.5-5"></path></svg>
+                    Inbox<span class="nav-badge zero" id="navPending">0</span></button>
+                <button class="nav-item" data-nav="send" onclick="openSend()">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M2.5 9l12-5.5-4.4 12-2.2-4.9z" stroke-linejoin="round"></path></svg>
+                    Send SMS</button>
+                <button class="nav-item admin-only" data-nav="admin" onclick="closeAllPanels();openAdmin()">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><rect x="5" y="2" width="8" height="14" rx="2"></rect><path d="M8 13.5h2"></path></svg>
+                    Devices &amp; Users</button>
+                <button class="nav-item admin-only" data-nav="history" onclick="closeAllPanels();openHistory()">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><circle cx="9" cy="9" r="6.5"></circle><path d="M9 5.5V9l2.5 1.6" stroke-linecap="round"></path></svg>
+                    History</button>
+                <button class="nav-item admin-only" data-nav="config" onclick="closeAllPanels();openConfig()">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M3 5h12M3 9h12M3 13h12" stroke-linecap="round"></path></svg>
+                    Filters &amp; Settings</button>
+                <div class="nav-card admin-only">
+                    <span class="eyebrow">SYSTEM</span>
+                    <span id="navSystem">Checking…</span>
                 </div>
-                <div class="sms-list" id="pendingList">
-                    <div class="empty-state"><div class="empty-state-icon">📭</div><div>No pending messages</div></div>
+            </nav>
+
+            <main class="main">
+                <div class="page-head">
+                    <div>
+                        <h1>Inbox</h1>
+                        <p>Every SMS your phones forward, newest first. A code is fetchable for a short window after it arrives.</p>
+                    </div>
+                    <div class="search-bar">
+                        <!-- The ✕ lives IN the box and only exists while there is
+                             something to clear. -->
+                        <div class="search-wrap">
+                            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.8" fill="none" stroke="#7A81A3" stroke-width="1.6"></circle><path d="M10.5 10.5l3.5 3.5" stroke="#7A81A3" stroke-width="1.6" stroke-linecap="round"></path></svg>
+                            <input type="text" id="searchInput" placeholder="Search number or sender" oninput="filterMessages()" aria-label="Search messages">
+                            <button id="searchClear" class="search-clear" onclick="clearSearch()" title="Clear" aria-label="Clear search">✕</button>
+                        </div>
+                        <select class="filter-dropdown" id="numberFilter" onchange="filterMessages()" aria-label="Number">
+                            <option value="">All Numbers</option>
+                        </select>
+                    </div>
                 </div>
-            </div>
-            <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Finished <span class="count-badge" id="usedCount">0</span></div>
+
+                <div class="stats" id="statsRow"></div>
+
+                <div class="grid-container">
+                    <div class="section">
+                        <div class="section-header">
+                            <div class="section-title">Live <span class="count-badge" id="pendingCount">0</span></div>
+                        </div>
+                        <div class="sms-list" id="pendingList">
+                            <div class="empty-state"><div class="empty-state-icon"></div><div>No pending messages</div></div>
+                        </div>
+                    </div>
+                    <div class="section">
+                        <div class="section-header">
+                            <div class="section-title">Finished <span class="count-badge" id="usedCount">0</span></div>
+                        </div>
+                        <div class="sms-list" id="usedList">
+                            <div class="empty-state"><div class="empty-state-icon"></div><div>No finished messages</div></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="sms-list" id="usedList">
-                    <div class="empty-state"><div class="empty-state-icon">📪</div><div>No finished messages</div></div>
-                </div>
-            </div>
+            </main>
         </div>
     </div>
 
-    <!-- CONFIG MODAL -->
+    <!-- FILTERS & SETTINGS -->
     <div id="configOverlay" class="config-overlay">
-        <div class="config-modal">
-            <h3>⚙️ Filters & Settings <button class="config-close" onclick="closeConfig()">✕</button></h3>
+        <div class="config-modal" role="dialog" aria-label="Filters and settings">
+            <h3>Filters &amp; Settings <button class="config-close" onclick="closeConfig()" aria-label="Close">✕</button></h3>
             <div class="config-section"><h4>Default OTP Patterns</h4><div id="defaultPatternsList"></div>
                 <div class="config-add"><input id="newDefaultPattern" placeholder='Regex e.g. (\d{4,8})'><button onclick="addDefaultPattern()">+ Add</button></div>
             </div>
             <div class="config-section"><h4>Number-Specific Rules</h4><div id="numberRulesList"></div>
-                <div class="config-add"><input id="newRulePhone" placeholder="Phone / sender" style="max-width:140px"><input id="newRulePattern" placeholder="Pattern"><button onclick="addNumberRule()">+ Add</button></div>
+                <div class="config-add"><input id="newRulePhone" placeholder="Phone / sender" style="max-width:160px"><input id="newRulePattern" placeholder="Pattern"><button onclick="addNumberRule()">+ Add</button></div>
             </div>
             <div class="config-section"><h4>Settings</h4>
-                <div class="setting-row"><label>Auto-delete (minutes)</label><input type="number" id="cfgAutoDelete" min="1" max="1440" value="30"></div>
+                <div class="setting-row"><label for="cfgAutoDelete">Auto-delete (minutes)</label><input type="number" id="cfgAutoDelete" min="1" max="1440" value="30"></div>
             </div>
-            <!-- fcm.getStatus() has been on /api/full-settings for several
-                 releases and nothing rendered it. send() is fire-and-forget by
-                 design, so a broken service account is completely silent: the
-                 toggle still returns 200 and the phone simply never hears. This
-                 is the first place to look when push "feels slow". -->
+            <!-- send() is fire-and-forget by design, so a broken service account
+                 is silent: this is the first place to look when push feels slow. -->
             <div class="config-section"><h4>Push (FCM)</h4>
                 <div id="fcmStatus" class="fcm-status">—</div>
             </div>
             <!-- Which source the running filters came from, and whether your last
-                 save actually reached durable storage. Without this, "saved
-                 locally but not to the cloud" is indistinguishable from "saved",
-                 and you would only find out at the next redeploy. -->
+                 save actually reached durable storage. -->
             <div class="config-section"><h4>Config storage</h4>
                 <div id="configStatus" class="fcm-status">—</div>
             </div>
-            <!-- Filled by saveConfig() when the server REFUSES a pattern. The
-                 server validates (a double-escaped or group-less pattern can
-                 never match and would silently lose every OTP from that
-                 sender); without somewhere to put the reason, that validation
-                 was invisible here and the modal reported success anyway. -->
+            <!-- Filled by saveConfig() when the server REFUSES a pattern. -->
             <div id="configError" class="config-error"></div>
-            <button class="save-config-btn" onclick="saveConfig()">💾 Save All Changes</button>
+            <button class="save-config-btn" onclick="saveConfig()">Save all changes</button>
         </div>
     </div>
-    <!-- USERS & DEVICES (admin) -->
+
+    <!-- DEVICES & USERS (admin) -->
     <div id="adminOverlay" class="config-overlay">
-        <div class="config-modal">
-            <h3>👥 Users &amp; Devices <button class="config-close" onclick="closeAdmin()">✕</button></h3>
+        <div class="config-modal wide" role="dialog" aria-label="Devices and users">
+            <h3>Devices &amp; Users <button class="config-close" onclick="closeAdmin()" aria-label="Close">✕</button></h3>
             <div id="adminNotice" class="config-error"></div>
             <div class="config-section">
-                <h4>Users <span class="a-count" id="usersCount">0</span></h4>
-                <div id="usersList"></div>
-                <div class="config-add"><input id="newUserName" placeholder="Name, e.g. Rahim"><button onclick="createUser()">+ Create</button></div>
+                <h4>Devices <span class="a-count" id="devicesCount">0</span>
+                    <label id="inactiveToggleWrap" style="margin-left:auto;font-family:var(--sans);letter-spacing:0;text-transform:none;font-size:13px;font-weight:400;color:var(--text-2);cursor:pointer;display:none">
+                        <input type="checkbox" id="showInactive" style="vertical-align:middle;accent-color:var(--cyan)"> Show inactive (<span id="inactiveCount">0</span>)</label></h4>
+                <div id="devicesList" class="a-list"></div>
+                <div class="a-note" style="margin-top:12px">SIM numbers come from each phone and update the moment they change.
+                    The <b>Fallback SIM</b> field is only for a phone that reports no number at all — its
+                    messages are otherwise filed under a device key that <span class="mono">GET /get</span> cannot reach.</div>
             </div>
             <div class="config-section">
-                <h4>Devices <span class="a-count" id="devicesCount">0</span>
-                    <label id="inactiveToggleWrap" style="float:right;font-size:11.5px;font-weight:400;color:var(--text-3);cursor:pointer;display:none">
-                        <input type="checkbox" id="showInactive" style="vertical-align:middle"> Show inactive (<span id="inactiveCount">0</span>)</label></h4>
-                <div id="devicesList"></div>
-                <div class="a-note">A phone that cannot read its own SIM number files its
-                    messages under a device key, where <span class="mono">GET /get</span>
-                    cannot reach them. Set the SIM number on any card flagged amber.</div>
+                <h4>Users <span class="a-count" id="usersCount">0</span></h4>
+                <div id="usersList" class="a-list"></div>
+                <div class="config-add"><input id="newUserName" placeholder="Name, e.g. Rahim"><button onclick="createUser()">+ Create user</button></div>
             </div>
             <div class="config-section"><h4>Allowed server hosts</h4>
                 <div id="hostsList"></div>
@@ -832,8 +790,8 @@
 
     <!-- HISTORY (admin) -->
     <div id="historyOverlay" class="config-overlay">
-        <div class="config-modal">
-            <h3>🕘 History <button class="config-close" onclick="closeHistory()">✕</button></h3>
+        <div class="config-modal wide" role="dialog" aria-label="History">
+            <h3>History <button class="config-close" onclick="closeHistory()" aria-label="Close">✕</button></h3>
             <div id="historyNotice" class="config-error"></div>
             <div class="config-section"><h4>Last 30 days</h4>
                 <div id="historyStrip" class="strip"></div>
@@ -841,8 +799,8 @@
             </div>
             <div class="config-section"><h4>Messages</h4>
                 <div class="config-add">
-                    <select id="histUser" onchange="loadHistory()"><option value="">All users</option></select>
-                    <select id="histOutcome" onchange="renderHistory()">
+                    <select id="histUser" onchange="loadHistory()" aria-label="User"><option value="">All users</option></select>
+                    <select id="histOutcome" onchange="renderHistory()" aria-label="Outcome">
                         <option value="">Any outcome</option>
                         <option value="fetched">fetched</option>
                         <option value="expired">never fetched</option>
@@ -850,7 +808,7 @@
                         <option value="no_code">no code extracted</option>
                         <option value="cleared">cleared</option>
                     </select>
-                    <input id="histSearch" placeholder="sender or number" oninput="renderHistory()">
+                    <input id="histSearch" placeholder="sender or number" oninput="renderHistory()" aria-label="Search history">
                 </div>
                 <div class="hist-toolbar">
                     <label class="hist-check"><input type="checkbox" id="histAll" onchange="toggleAllHistory(this)"> Select all shown</label>
@@ -862,21 +820,68 @@
             </div>
             <div class="config-section"><h4>Bulk delete</h4>
                 <div class="config-add">
-                    <input id="histOlderThan" type="number" min="1" value="30" style="max-width:110px">
+                    <input id="histOlderThan" type="number" min="1" value="30" style="max-width:120px" aria-label="Days">
                     <button onclick="deleteHistoryOlder()">Delete older than N days</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- ONE MESSAGE, IN FULL.
-         The history row truncates, and the body is exactly what you opened
-         History to read. Sits ABOVE the History modal rather than replacing it,
-         so closing this returns you to the list where you left it. -->
+    <!-- SEND SMS (4.41.0) — a real SMS from one of your phones' SIM cards. -->
+    <div id="sendOverlay" class="config-overlay">
+        <div class="config-modal wide" role="dialog" aria-label="Send SMS">
+            <h3>Send SMS <button class="config-close" onclick="closeSend()" aria-label="Close">✕</button></h3>
+            <div id="sendNotice" class="config-error"></div>
+            <div class="send-layout">
+                <section aria-label="Compose">
+                    <div class="step">
+                        <div class="step-head"><span class="step-n">1</span><h4>Send from</h4>
+                            <span class="step-hint">Online phones with a confirmed number</span></div>
+                        <div id="sendFrom" class="sender-grid"></div>
+                    </div>
+                    <div class="step">
+                        <div class="step-head"><span class="step-n">2</span><h4>Send to</h4>
+                            <span class="step-hint" id="sendToCount">0 of 100</span></div>
+                        <div class="field-row">
+                            <label class="field">Any number
+                                <input id="sendTyped" placeholder="01711111111, 01822… (comma or space)" autocomplete="off"></label>
+                            <button class="tb-btn" style="height:44px" onclick="addTypedRecipients()">Add</button>
+                        </div>
+                        <div id="sendUsersWrap" style="display:flex;flex-direction:column;gap:8px">
+                            <span style="font-size:13px;color:var(--text-2)">Or a user — every confirmed SIM on their phones is added</span>
+                            <div id="sendUsers" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+                        </div>
+                        <div id="sendRecipients" class="chips"></div>
+                        <div id="sendToNote" class="note-warn"></div>
+                    </div>
+                    <div class="step">
+                        <div class="step-head"><span class="step-n">3</span><h4>Message</h4></div>
+                        <label class="field">Text — English or Bangla, up to 3 SMS parts
+                            <textarea id="sendMessage" rows="5" placeholder="Type the message…" oninput="updateSendSummary()"></textarea></label>
+                        <div class="meter"><i id="sendM1"></i><i id="sendM2"></i><i id="sendM3"></i><span id="sendCount">Empty</span></div>
+                    </div>
+                    <div class="send-bar">
+                        <div class="grow"><b id="sendSummary">Add at least one recipient</b><span id="sendSummarySub">Numbers, users, or both</span></div>
+                        <button id="sendBtn" class="primary-btn" onclick="submitSend()" disabled>Send</button>
+                    </div>
+                </section>
+                <aside aria-label="Outbox">
+                    <div class="step">
+                        <div class="step-head"><h4>Outbox</h4><span class="step-hint">updates live</span></div>
+                        <div id="sendQuota" class="quota">—</div>
+                        <div id="outboxList" class="outbox"></div>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </div>
+
+    <!-- ONE MESSAGE, IN FULL. Sits ABOVE the History panel rather than
+         replacing it, so closing this returns you to the list where you left it. -->
     <div id="msgOverlay" class="msg-overlay">
-        <div class="msg-modal">
+        <div class="msg-modal" role="dialog" aria-label="Message">
             <h3><span id="msgTitle">Message</span>
-                <button class="config-close" onclick="closeMessage()">✕</button></h3>
+                <button class="config-close" onclick="closeMessage()" aria-label="Close">✕</button></h3>
             <div id="msgCode" class="msg-code none">—</div>
             <dl id="msgMeta" class="msg-meta"></dl>
             <div id="msgBody" class="msg-body"></div>
@@ -888,7 +893,7 @@
         </div>
     </div>
 
-    <div id="notification" class="notification"></div>
+    <div id="notification" class="notification" role="status" aria-live="polite"></div>
 
     <script>
     // ═══════════════════════════════════════════════════════════
@@ -1047,6 +1052,11 @@
 
             showDashboard();
             connectSSE();
+            // The outbox feeds the "sent today" tile; quietly absent when the
+            // server has users switched off.
+            loadOutbox(true);
+            // Phones online changes on their own clock; keep the tiles honest.
+            if (!window._statsTimer) window._statsTimer = setInterval(refreshFcmStatus, 60_000);
         } catch (e) {
             // Network error — retry in 3 seconds
             setTimeout(() => {
@@ -1094,6 +1104,19 @@
         });
 
         eventSource.addEventListener('clear_all', () => { allMessages = {}; renderAll(); notify('🗑️ All messages cleared'); });
+
+        // An SMS sent from the dashboard changed state (4.41.0). Scoped by the
+        // server: the sender, the SIM's owner and admins only.
+        eventSource.addEventListener('send_update', e => {
+            const job = JSON.parse(e.data);
+            const before = outboxJobs[job.id];
+            outboxJobs[job.id] = job;
+            scheduleOutboxRender();
+            if (before && before.status !== job.status
+                    && (job.status === 'failed' || job.status === 'undelivered')) {
+                notify('SMS to ' + job.to + ' failed — ' + (job.error || job.status));
+            }
+        });
 
         // A phone reported a SIM change (4.40.0, admin only). Refresh the open
         // Users & Devices panel — through the same polite watcher as a push:
@@ -1247,15 +1270,15 @@
             ? identity.overrides[me.userId].remainingMs : 0;
 
         if (globalForwarding) {
-            btn.textContent = '🟢 Forwarding ON';
+            btn.textContent = 'Forwarding ON';
             btn.title = 'Forwarding is on for everyone. Only an admin can change this.';
             btn.disabled = true;
         } else if (left > 0) {
-            btn.textContent = '🟢 My phones on — ' + Math.ceil(left / 60000) + ' min left';
+            btn.textContent = 'My phones on — ' + Math.ceil(left / 60000) + ' min left';
             btn.title = 'Your override is running. It ends on its own.';
             btn.disabled = true;
         } else {
-            btn.textContent = '▶️ Turn my phones on';
+            btn.textContent = 'Turn my phones on';
             btn.title = 'Forwarding is off globally. Switch your own phones on for a while.';
             btn.disabled = false;
         }
@@ -1359,7 +1382,8 @@
         if (document.getElementById('msgOverlay').classList.contains('open')) {
             closeMessage(); return;
         }
-        for (const [id, fn] of [['historyOverlay', closeHistory],
+        for (const [id, fn] of [['sendOverlay', closeSend],
+                                ['historyOverlay', closeHistory],
                                 ['adminOverlay', closeAdmin],
                                 ['configOverlay', closeConfig]]) {
             if (document.getElementById(id).classList.contains('open')) { fn(); return; }
@@ -1410,13 +1434,14 @@
         renderList('usedList', 'usedCount', used, true);
         updateNumberFilter(numbers);
         startExpiryTimer();
+        renderStats();
     }
 
     function renderList(containerId, countId, items, isUsed) {
         const container = document.getElementById(containerId);
         document.getElementById(countId).textContent = items.length;
         if (!items.length) {
-            container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${isUsed?'📪':'📭'}</div><div>No ${isUsed?'used':'pending'} messages</div></div>`;
+            container.innerHTML = `<div class="empty-state"><div class="empty-state-icon"></div><div>${isUsed ? 'No finished messages' : 'No live codes right now'}</div></div>`;
             return;
         }
         container.innerHTML = items.map(sms => {
@@ -1433,11 +1458,17 @@
                 ? ` <span class="sms-lag">• delivered ${Math.floor(lagSec / 60)}m late</span>`
                 : '';
 
-            return `<div class="sms-card${usedClass}" data-id="${sms.id}">
-                <div class="sms-sender">${esc(sms.sender)} → ${esc(sms.recipient)}${recipientNote(sms)}</div>
+            // 'internal' (4.41.0): from one of our own SIMs — never an OTP, and
+            // marked so nobody waits for a code from it.
+            const kind = sms.status === 'internal' ? ' used internal' : usedClass;
+            return `<div class="sms-card${kind}" data-id="${esc(sms.id)}">
+                <div class="sms-top">
+                    <div class="sms-sender"><b>${esc(sms.sender)}</b><span class="to">→ ${esc(sms.recipient)}</span>${recipientNote(sms)}</div>
+                    <span class="sms-pill">${esc(shortStatus(sms))}</span>
+                </div>
+                ${code ? `<div class="sms-code${usedClass}" data-code="${esc(code)}" title="Click to copy">${esc(code)}<span class="copy-hint">${sms.status === 'pending' ? 'copy' : ''}</span></div>` : ''}
                 <div class="sms-message">${esc(sms.message)}</div>
-                ${code ? `<div class="sms-code${usedClass}" data-code="${esc(code)}" title="Click to copy" style="cursor:pointer">${esc(code)} <span style="font-size:11px;opacity:0.6">📋</span></div>` : ''}
-                <div class="sms-time">${time}${lag}<span class="sms-status${usedClass}"> • ${esc(statusLabel(sms))}</span></div>
+                <div class="sms-time">${time}${lag}${sms.deviceLabel ? ' · ' + esc(sms.deviceLabel) : ''}<span class="sms-status${usedClass}"> · ${esc(statusLabel(sms))}</span></div>
                 ${sms.status === 'pending' ? `<div class="expiry-bar-wrap"><div class="expiry-bar" style="width:${w.pct}%;background:${w.color}"></div></div><div class="expiry-countdown${w.urgent ? ' urgent' : ''}">${esc(w.text)}</div>` : ''}
             </div>`;
         }).join('');
@@ -1477,6 +1508,19 @@
         select.innerHTML = options.join('');
     }
 
+    /** The one-word tag on a card's corner. */
+    function shortStatus(sms) {
+        switch (sms.status) {
+            case 'pending':    return sms.test ? 'Test' : ((sms.extractedCode || sms.code) ? 'Live' : 'Waiting');
+            case 'used':       return 'Used';
+            case 'superseded': return 'Superseded';
+            case 'expired':    return 'Expired';
+            case 'no_code':    return 'No code';
+            case 'internal':   return 'Internal';
+            default:           return sms.status || '';
+        }
+    }
+
     /** What a card's status means, in words. */
     function statusLabel(sms) {
         switch (sms.status) {
@@ -1485,6 +1529,7 @@
                                                : 'Superseded — not the live code';
             case 'expired':    return 'Expired — never fetched';
             case 'no_code':    return 'No code extracted';
+            case 'internal':   return 'From one of your own SIMs — never an OTP';
             case 'pending':
                 if (sms.test) return 'Test';
                 if (sms.stale) return 'Late replay';
@@ -1577,7 +1622,7 @@
         btn.title = globalForwarding
             ? 'Forwarding is ON for every device. Click to turn it off.'
             : 'Forwarding is OFF. Click to turn it on.';
-        btn.textContent = globalForwarding ? '🟢 ON' : '🔴 OFF';
+        btn.textContent = globalForwarding ? 'Forwarding ON' : 'Forwarding OFF';
         btn.className = 'forward-toggle-btn ' + (globalForwarding ? 'enabled' : 'disabled');
     }
 
@@ -1687,6 +1732,7 @@
             renderLoadBanner();
             renderOverrideButton();
             if (me.role === 'admin') fillTargetDropdown();
+            renderStats();
         } catch (e) { /* the cached value stays on screen */ }
     }
 
@@ -2102,6 +2148,16 @@
                             : '<span class="pill pill-warn">awaiting enrollment</span>'}
                     </div>
                 </div>
+                <div class="send-perm">
+                    <div class="grow"><b>Can send SMS</b><span>${u.sendEnabled
+                        ? 'Up to ' + esc(u.sendDailyLimit) + ' SMS a day (each part counts), from their own SIMs only'
+                        : 'Off — Send SMS is hidden from them'}</span></div>
+                    <button class="switch${u.sendEnabled ? ' on' : ''}" data-act="sendToggle" data-id="${esc(u.id)}"
+                            aria-pressed="${u.sendEnabled ? 'true' : 'false'}" aria-label="Allow ${esc(u.name)} to send SMS"></button>
+                    <div class="a-field"><label>Per day</label>
+                        <input class="a-input" style="width:84px" type="number" min="1" max="1000"
+                               data-send-limit="${esc(u.id)}" value="${esc(u.sendDailyLimit || 50)}" aria-label="Daily SMS limit for ${esc(u.name)}"></div>
+                </div>
                 <div class="a-foot">
                     <button class="a-btn ${u.active ? '' : 'good'}" data-act="${
                         u.active ? 'deactivate' : 'activate'}" data-id="${esc(u.id)}">${
@@ -2185,16 +2241,18 @@
                     <div class="a-ident">
                         <div class="a-name">${esc(d.name)}</div>
                         <div class="a-sub">${esc(d.id.slice(0, 12))}${
-                            d.model ? ' \u00b7 ' + esc(d.model) : ''}</div>
+                            d.model ? ' \u00b7 ' + esc(d.model) : ''}${
+                            d.appVersion ? ' \u00b7 app ' + esc(d.appVersion) : ''} \u00b7 ${
+                            d.canSendSms === true ? 'can send SMS'
+                            : d.canSendSms === false ? 'SMS permission off' : 'cannot send (app &lt; 4.36)'}</div>
                     </div>
                     <div class="a-tags">
                         <span class="pill ${live ? 'pill-ok' : (d.inactive ? 'pill-warn' : 'pill-idle')}">${
                             age === null ? (d.lastActive ? sinceWhen(d.lastActive) : 'never seen')
                                          : live ? 'online' : seenAgo(age)}</span>
-                        ${reported.map(s => `<span class="pill ${s.unconfirmed ? 'pill-warn' : 'pill-idle'}">${
-                            esc(s.number)}</span>`).join('')}
-                        ${!reported.length && simSet ? `<span class="pill pill-idle">${esc(d.simNumber)}</span>` : ''}
-                        ${!reported.length && !simSet ? '<span class="pill pill-warn">no SIM number</span>' : ''}
+                        ${unconfirmed ? '<span class="pill pill-warn">check SIM</span>' : ''}
+                        ${conflicts ? '<span class="pill pill-off">duplicate</span>' : ''}
+                        ${!reported.length && !simSet && !unconfirmed ? '<span class="pill pill-warn">no SIM number</span>' : ''}
                     </div>
                 </div>
                 ${simRows(d)}
@@ -2206,7 +2264,7 @@
                     <div class="a-field"><label>Fallback SIM</label>
                         <input class="a-input${simSet || reported.length ? '' : ' needed'}"
                                data-sim="${esc(d.id)}" value="${esc(d.simNumber || '')}"
-                               placeholder="01711111111" title="${simTitle}"></div>
+                               placeholder="only if needed" title="${simTitle}"></div>
                     <span class="spacer"></span>
                     <button class="a-btn danger" data-act="removeDevice" data-id="${esc(d.id)}">Remove</button>
                 </div>
@@ -2429,6 +2487,17 @@
         adminPost('/api/users/' + encodeURIComponent(id) + '/purge', {}, id + ' purged');
     }
 
+    /** Who may send SMS, and how many a day (4.41.0). Enforced by the server. */
+    function setUserSend(id, change) {
+        if (change.dailyLimit !== undefined && !(change.dailyLimit >= 1 && change.dailyLimit <= 1000)) {
+            adminNotice('Daily limit must be between 1 and 1000', true); return;
+        }
+        adminPost('/api/users/' + encodeURIComponent(id) + '/send', change,
+            change.enabled === true ? id + ' can now send SMS'
+            : change.enabled === false ? id + ' can no longer send SMS'
+            : 'Daily limit saved');
+    }
+
     function assignDevice(id, userId) {
         adminPost('/api/devices/' + encodeURIComponent(id) + '/assign',
             { userId: userId || null }, 'Device assigned');
@@ -2543,6 +2612,7 @@
             case 'removeDevice': removeDevice(id);         break;
             case 'pushUsername': pushUsername(id);         break;
             case 'removeHost':   removeHost(parseInt(id, 10)); break;
+            case 'sendToggle':   setUserSend(id, { enabled: b.getAttribute('aria-pressed') !== 'true' }); break;
         }
     });
 
@@ -2551,6 +2621,8 @@
         if (sel) assignDevice(sel.getAttribute('data-assign'), sel.value);
         const sim = e.target.closest('[data-sim]');
         if (sim) setDeviceSim(sim.getAttribute('data-sim'), sim.value);
+        const lim = e.target.closest('[data-send-limit]');
+        if (lim) setUserSend(lim.getAttribute('data-send-limit'), { dailyLimit: parseInt(lim.value, 10) });
     });
 
     // ═══════════════════════════════════════════════════════════
@@ -2839,6 +2911,431 @@
             await loadHistory();
         } catch (e) { historyNotice('Could not reach the server', true); }
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  NAVIGATION RAIL + STATS (4.41.0)
+    // ═══════════════════════════════════════════════════════════
+    const PANELS = [['sendOverlay', 'send'], ['adminOverlay', 'admin'],
+                    ['historyOverlay', 'history'], ['configOverlay', 'config']];
+
+    /** Back to the inbox: close whichever panel is open, through its own close function. */
+    function closeAllPanels() {
+        if (document.getElementById('sendOverlay').classList.contains('open')) closeSend();
+        if (document.getElementById('adminOverlay').classList.contains('open')) closeAdmin();
+        if (document.getElementById('historyOverlay').classList.contains('open')) closeHistory();
+        if (document.getElementById('configOverlay').classList.contains('open')) closeConfig();
+    }
+
+    /** The rail follows whichever panel is open — observed, so no open/close function had to change. */
+    function syncNav() {
+        let active = 'inbox';
+        for (const [id, name] of PANELS) {
+            if (document.getElementById(id).classList.contains('open')) { active = name; break; }
+        }
+        document.querySelectorAll('.nav-item').forEach(el =>
+            el.classList.toggle('active', el.getAttribute('data-nav') === active));
+    }
+    new MutationObserver(syncNav).observe(document.body,
+        { subtree: true, attributes: true, attributeFilter: ['class'] });
+
+    /** Dhaka midnight, as the server counts the daily limit. */
+    function dhakaDayStart() {
+        const off = 6 * 3600_000;
+        return Math.floor((Date.now() + off) / 86400_000) * 86400_000 - off;
+    }
+
+    /**
+     * The four tiles. Every number is read from data the page already holds —
+     * nothing is estimated, and a tile with nothing true to say says so.
+     */
+    function renderStats() {
+        const el = document.getElementById('statsRow');
+        if (!el) return;
+        const msgs = Object.values(allMessages);
+        const live = msgs.filter(m => m.status === 'pending' && (m.extractedCode || m.code)).length;
+        const finished = msgs.filter(m => m.status !== 'pending').length;
+        const badge = document.getElementById('navPending');
+        if (badge) { badge.textContent = live; badge.classList.toggle('zero', live === 0); }
+
+        const tiles = [{ k: 'LIVE CODES', v: String(live), s: live ? 'fetchable right now' : 'nothing waiting', c: 'gold' }];
+        if (identity && typeof identity.devices === 'number') {
+            tiles.push({ k: 'PHONES ONLINE', v: (identity.devicesSeenRecently || 0) + '/' + identity.devices,
+                         s: 'checked in during the last 2 minutes', c: 'cyan' });
+        }
+        if (outboxLoaded) {
+            const from = dhakaDayStart();
+            const today = Object.values(outboxJobs).filter(j => j.createdAt >= from && j.status !== 'cancelled');
+            const by = st => today.filter(j => j.status === st).length;
+            const parts = [];
+            if (by('delivered')) parts.push(by('delivered') + ' delivered');
+            if (by('sent')) parts.push(by('sent') + ' sent');
+            const waiting = by('queued') + by('dispatched') + by('sending');
+            if (waiting) parts.push(waiting + ' in progress');
+            const bad = by('failed') + by('undelivered') + by('unknown') + by('expired');
+            if (bad) parts.push(bad + ' not sent');
+            tiles.push({ k: 'SMS SENT TODAY', v: String(today.length), s: parts.join(' · ') || 'none yet', c: '' });
+        }
+        tiles.push({ k: 'FINISHED', v: String(finished), s: 'on the board, newest first', c: '' });
+        el.innerHTML = tiles.map(t => `<div class="stat ${t.c}"><span class="eyebrow">${esc(t.k)}</span>`
+            + `<b>${esc(t.v)}</b><span>${esc(t.s)}</span></div>`).join('');
+
+        const sys = document.getElementById('navSystem');
+        if (sys && configStatus) {
+            const loaded = configStatus.load && configStatus.load.identity && configStatus.load.identity.ok !== false;
+            sys.textContent = (configStatus.firestore && configStatus.firestore.enabled)
+                ? (loaded ? 'Firestore connected — config, users and SIMs are saved.'
+                          : 'Firestore NOT loaded — see the red banner.')
+                : 'Firestore off — data lives only in this server process.';
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SEND SMS (4.41.0) — see lib/outbox.js
+    //
+    //  The server decides everything that matters (who may send, from which
+    //  SIM, how many) and refuses what it does not allow; this panel only
+    //  offers what /api/send/options says is possible, so a refusal is rare
+    //  and, when it happens, shown in words.
+    // ═══════════════════════════════════════════════════════════
+    let sendOpts = null;
+    let sendFromKey = '';            // "deviceId|slot"
+    let sendRecipients = [];         // [{ number, label }]
+    let outboxJobs = {};             // id -> job
+    let outboxLoaded = false;
+
+    /**
+     * SMS parts — THE SAME RULE AS lib/outbox.js smsParts(). test/send-ui.test.js
+     * runs both over the same inputs; change one and that test says so.
+     */
+    function smsParts(text) {
+        const GSM_BASIC = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\u001bÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?'
+            + '¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
+        const GSM_EXT = '^{}\\[~]|€\f';
+        text = String(text == null ? '' : text);
+        let gsm = true, units = 0;
+        for (const ch of text) {
+            if (GSM_BASIC.includes(ch)) units += 1;
+            else if (GSM_EXT.includes(ch)) units += 2;
+            else { gsm = false; break; }
+        }
+        if (!gsm) units = text.length;
+        const single = gsm ? 160 : 70, multi = gsm ? 153 : 67;
+        const parts = units === 0 ? 0 : (units <= single ? 1 : Math.ceil(units / multi));
+        return { encoding: gsm ? 'gsm' : 'ucs2', units, parts, capacity: parts <= 1 ? single : parts * multi };
+    }
+
+    /** A typed number in canonical form, or '' — the server applies the same rule. */
+    function canonicalNumber(raw) {
+        const t = String(raw || '').trim();
+        if (!t || /[^0-9+\-\s().]/.test(t)) return '';
+        let d = t.replace(/[^0-9]/g, '');
+        if (d.startsWith('00880') && d.length === 15) d = '0' + d.slice(5);
+        else if (d.startsWith('880') && d.length === 13) d = '0' + d.slice(3);
+        else if (d.length === 10 && d.startsWith('1')) d = '0' + d;
+        return /^01[3-9][0-9]{8}$/.test(d) ? d : '';
+    }
+
+    function sendNotice(text) {
+        const el = document.getElementById('sendNotice');
+        el.textContent = text || '';
+        el.classList.toggle('show', !!text);
+    }
+
+    async function openSend() {
+        closeAllPanels();
+        document.getElementById('sendOverlay').classList.add('open');
+        sendNotice('');
+        await Promise.all([loadSendOptions(), loadOutbox()]);
+        updateSendSummary();
+    }
+    function closeSend() { document.getElementById('sendOverlay').classList.remove('open'); }
+
+    async function loadSendOptions() {
+        try {
+            const res = await fetch('/api/send/options', { headers: authHeaders() });
+            if (res.status === 404) {
+                sendOpts = null;
+                sendNotice('Sending needs users switched on in the server (USERS_ENABLED=true).');
+                renderSendForm(); return;
+            }
+            if (res.status === 401) { doLogout(); return; }
+            if (!res.ok) { sendNotice(await describeFailure(res)); return; }
+            sendOpts = await res.json();
+            // Keep the chosen SIM only while it can still send.
+            const still = (sendOpts.senders || []).find(x => x.deviceId + '|' + x.slot === sendFromKey && x.ok);
+            if (!still) {
+                const first = (sendOpts.senders || []).find(x => x.ok);
+                sendFromKey = first ? first.deviceId + '|' + first.slot : '';
+            }
+            renderSendForm();
+        } catch (e) { sendNotice('Could not reach the server'); }
+    }
+
+    function currentSender() {
+        return sendOpts ? (sendOpts.senders || []).find(x => x.deviceId + '|' + x.slot === sendFromKey && x.ok) : null;
+    }
+
+    function renderSendForm() {
+        const q = sendOpts && sendOpts.quota;
+        const quota = document.getElementById('sendQuota');
+        if (!q) {
+            quota.innerHTML = '—';
+        } else if (!q.canSend) {
+            quota.innerHTML = '<b>Sending is not enabled for your account.</b> Ask the admin to turn it on.';
+        } else if (q.dailyLimit == null) {
+            quota.innerHTML = `<span>Today you have sent <b>${esc(q.usedToday)}</b> — no daily limit for admin</span>`;
+        } else {
+            const pct = Math.min(100, Math.round(q.usedToday / q.dailyLimit * 100));
+            quota.innerHTML = `<span><b>${esc(q.remaining)}</b> of ${esc(q.dailyLimit)} SMS left today</span>`
+                + `<div class="bar"><i style="width:${pct}%"></i></div>`;
+        }
+
+        const from = document.getElementById('sendFrom');
+        const senders = sendOpts ? (sendOpts.senders || []) : [];
+        from.innerHTML = senders.length ? senders
+            .slice().sort((a, b) => (b.ok - a.ok) || a.ownerName.localeCompare(b.ownerName) || a.slot - b.slot)
+            .map(x => {
+                const key = x.deviceId + '|' + x.slot;
+                const dot = x.ok ? '' : (/changed/i.test(x.reason) ? 'warn' : 'off');
+                return `<button class="sender${key === sendFromKey ? ' on' : ''}" data-sender="${esc(key)}"
+                            ${x.ok ? '' : 'disabled'} aria-pressed="${key === sendFromKey ? 'true' : 'false'}">
+                    <span class="t">${esc(x.ownerName)} · ${esc(x.deviceName)} · SIM ${esc(x.slot)}<i class="${dot}"></i></span>
+                    <span class="n">${esc(x.number || 'not set')}</span>
+                    <span class="r${dot === 'warn' ? ' warn' : ''}">${esc(x.ok ? (x.queued ? x.queued + ' waiting in its queue' : 'ready') : x.reason)}</span>
+                </button>`;
+            }).join('')
+            : '<div class="a-empty">No phone of yours has reported its SIMs yet. Update the app to 4.36.0 on your phones.</div>';
+
+        const users = document.getElementById('sendUsers');
+        const dir = sendOpts ? (sendOpts.directory || []) : [];
+        document.getElementById('sendUsersWrap').style.display = dir.length ? '' : 'none';
+        users.innerHTML = dir.map(u => {
+            const ok = u.sims.filter(x => !x.unconfirmed).length;
+            return `<button class="user-chip" data-adduser="${esc(u.userId)}"><span class="av">${esc(initial(u.name))}</span>`
+                + `${esc(u.name)}<span class="c">${ok ? ok + ' SIM' + (ok === 1 ? '' : 's') : 'no confirmed SIM'}</span></button>`;
+        }).join('');
+
+        const canSend = !!(q && q.canSend);
+        document.getElementById('sendMessage').disabled = !canSend;
+        document.getElementById('sendTyped').disabled = !canSend;
+        renderRecipients();
+    }
+
+    function renderRecipients() {
+        const box = document.getElementById('sendRecipients');
+        box.innerHTML = sendRecipients.length
+            ? sendRecipients.map(r => `<span class="chip"><span class="num">${esc(r.number)}</span>`
+                + (r.label ? `<span class="lbl">${esc(r.label)}</span>` : '')
+                + `<button data-remove="${esc(r.number)}" aria-label="Remove ${esc(r.number)}">✕</button></span>`).join('')
+            : '<span class="empty">No recipients yet</span>';
+        const max = sendOpts && sendOpts.limits ? sendOpts.limits.maxRecipients : 100;
+        document.getElementById('sendToCount').textContent = sendRecipients.length + ' of ' + max;
+        updateSendSummary();
+    }
+
+    function addRecipients(list, label) {
+        const from = currentSender();
+        const have = new Set(sendRecipients.map(r => r.number));
+        let skipped = 0;
+        for (const n of list) {
+            if (from && n === from.number) { skipped++; continue; }
+            if (have.has(n)) continue;
+            sendRecipients.push({ number: n, label: label || '' });
+            have.add(n);
+        }
+        document.getElementById('sendToNote').textContent = skipped ? 'The sending SIM itself was left out.' : '';
+        renderRecipients();
+    }
+
+    function addTypedRecipients() {
+        const input = document.getElementById('sendTyped');
+        const parts = input.value.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+        const good = [], bad = [];
+        for (const p of parts) { const c = canonicalNumber(p); (c ? good : bad).push(c || p); }
+        addRecipients(good, '');
+        input.value = bad.join(', ');
+        if (bad.length) document.getElementById('sendToNote').textContent =
+            'Not a Bangladeshi mobile number: ' + bad.join(', ');
+    }
+
+    function updateSendSummary() {
+        const msg = document.getElementById('sendMessage').value;
+        const p = smsParts(msg);
+        const max = sendOpts && sendOpts.limits ? sendOpts.limits.maxParts : 3;
+        const over = p.parts > max;
+        for (let i = 1; i <= 3; i++) {
+            document.getElementById('sendM' + i).className = i <= p.parts ? (over ? 'over' : 'on') : '';
+        }
+        const count = document.getElementById('sendCount');
+        count.className = over ? 'over' : '';
+        count.textContent = p.parts === 0 ? 'Empty'
+            : (p.encoding === 'gsm' ? 'English (GSM)' : 'Unicode / Bangla') + ' · ' + p.units + '/' + p.capacity
+              + ' · ' + p.parts + (p.parts === 1 ? ' part' : ' parts') + (over ? ` — too long, ${max} parts max` : '');
+
+        const from = currentSender();
+        const n = sendRecipients.length;
+        const q = sendOpts && sendOpts.quota;
+        const total = n * Math.max(1, p.parts);
+        let why = '';
+        if (!q || !q.canSend) why = 'Sending is not enabled for your account';
+        else if (!from) why = 'Choose a SIM to send from';
+        else if (!n) why = 'Add at least one recipient';
+        else if (!msg.trim()) why = 'Write the message';
+        else if (over) why = 'The message is too long';
+        // The limit counts billed SMS — every part — exactly as the server does.
+        else if (q.remaining != null && total > q.remaining) why = `Only ${q.remaining} SMS left today — this needs ${total}`;
+        document.getElementById('sendSummary').textContent = why || `Send to ${n} ${n === 1 ? 'number' : 'numbers'} from ${from.number}`;
+        document.getElementById('sendSummarySub').textContent = why
+            ? (from ? `From ${from.ownerName} · ${from.deviceName} · SIM ${from.slot}` : 'Numbers, users, or both')
+            : `${total} SMS in total · ${from.ownerName} · ${from.deviceName} · SIM ${from.slot} · paced at `
+              + `${sendOpts.limits.perPhoneWindow} SMS parts per ${sendOpts.limits.windowMinutes} min per phone`;
+        const btn = document.getElementById('sendBtn');
+        btn.disabled = !!why;
+        btn.textContent = why ? 'Send' : `Send ${total} SMS`;
+    }
+
+    let sending = false;
+    async function submitSend() {
+        if (sending) return;
+        const from = currentSender();
+        const message = document.getElementById('sendMessage').value;
+        if (!from || !sendRecipients.length || !message.trim()) return;
+        const p = smsParts(message);
+        // Real SMS cost real money from someone's SIM balance: say exactly what
+        // is about to happen, once.
+        if (!confirm(`Send ${sendRecipients.length * Math.max(1, p.parts)} SMS to ${sendRecipients.length} `
+                + `number(s) from ${from.number} (${from.ownerName} · ${from.deviceName} · SIM ${from.slot})?`)) return;
+        sending = true;
+        const btn = document.getElementById('sendBtn');
+        btn.disabled = true; btn.textContent = 'Sending…';
+        sendNotice('');
+        try {
+            const res = await fetch('/api/send', { method: 'POST', headers: authHeaders(), body: JSON.stringify({
+                fromDeviceId: from.deviceId, fromSlot: from.slot,
+                to: sendRecipients.map(r => r.number), message }) });
+            if (res.status === 401) { doLogout(); return; }
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                sendNotice(data.error || ('Not sent (HTTP ' + res.status + ')'));
+                await loadSendOptions();
+                return;
+            }
+            for (const j of data.jobs || []) outboxJobs[j.id] = j;
+            sendRecipients = [];
+            document.getElementById('sendMessage').value = '';
+            document.getElementById('sendToNote').textContent = (data.skipped || []).length
+                ? 'Left out: ' + data.skipped.map(x => x.number + ' (' + x.reason + ')').join(', ') : '';
+            notify(`Queued ${(data.jobs || []).length} SMS — the phone sends them now`);
+            await loadSendOptions();
+            renderOutbox();
+        } catch (e) {
+            sendNotice('Network error — the send may or may not have been queued. Check the Outbox before trying again.');
+            loadOutbox();
+        } finally {
+            sending = false;
+            updateSendSummary();
+        }
+    }
+
+    async function loadOutbox(quiet) {
+        try {
+            const res = await fetch('/api/send/jobs?limit=200', { headers: authHeaders() });
+            if (!res.ok) { if (!quiet && res.status !== 404) sendNotice(await describeFailure(res)); return; }
+            const data = await res.json();
+            outboxJobs = {};
+            for (const j of data.jobs || []) outboxJobs[j.id] = j;
+            outboxLoaded = true;
+            renderOutbox();
+            renderStats();
+        } catch (e) { /* the list stays as it was */ }
+    }
+
+    let outboxQueued = false;
+    function scheduleOutboxRender() {
+        if (outboxQueued) return;
+        outboxQueued = true;
+        requestAnimationFrame(() => { outboxQueued = false; renderOutbox(); renderStats(); });
+    }
+
+    const OB_WORDS = { queued: 'Queued', dispatched: 'Sending', sending: 'Sending', sent: 'Sent',
+                       delivered: 'Delivered', failed: 'Failed', undelivered: 'Not delivered',
+                       unknown: 'Unknown', expired: 'Expired', cancelled: 'Cancelled' };
+
+    function renderOutbox() {
+        const el = document.getElementById('outboxList');
+        if (!el) return;
+        const jobs = Object.values(outboxJobs).sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1)).slice(0, 100);
+        if (!jobs.length) { el.innerHTML = '<div class="a-empty">Nothing sent yet.</div>'; return; }
+        el.innerHTML = jobs.map(j => {
+            const st = j.status;
+            const when = hhmm(j.createdAt);
+            let meta = `from ${esc(j.fromNumber)} · ${when}`;
+            if (st === 'queued') meta += ' · waiting for the phone';
+            if ((st === 'sending' || st === 'dispatched') && j.parts > 1) meta += ` · part ${Math.min(j.parts, (j.partsSent || 0) + 1)} of ${esc(j.parts)}`;
+            if (st === 'sent') meta += ' · left the phone' + (j.sentAt ? ' ' + hhmm(j.sentAt) : '') + ' · no delivery report yet';
+            if (st === 'delivered') meta += j.receivedAt ? ' · arrived on your other phone' : (j.deliveredAt ? ' · delivered ' + hhmm(j.deliveredAt) : '');
+            if (j.createdByName && me.role === 'admin' && j.createdBy !== 'admin') meta += ' · by ' + esc(j.createdByName);
+            if (me.role !== 'admin' && j.createdBy !== me.userId) meta += ' · sent from your SIM by ' + esc(j.createdByName || j.createdBy);
+            const err = (st === 'failed' || st === 'undelivered' || st === 'unknown' || st === 'expired') && j.error
+                ? `<span class="meta err">${esc(j.error)}</span>` : '';
+            const cancel = st === 'queued' && (me.role === 'admin' || j.createdBy === me.userId)
+                ? `<button class="a-btn" data-cancel-job="${esc(j.id)}">Cancel</button>` : '';
+            return `<div class="ob">
+                <div class="h"><span class="to">${esc(j.to)}</span><span class="lbl">${esc(j.toLabel || '')}</span>
+                    <span class="st st-${esc(st)}">${esc(OB_WORDS[st] || st)}</span></div>
+                <span class="m">${esc(j.message)}</span>
+                <span class="meta">${meta}</span>${err}${cancel}
+            </div>`;
+        }).join('');
+    }
+
+    async function cancelJob(jobId) {
+        const res = await authFetch('/api/send/cancel', { method: 'POST', headers: authHeaders(),
+            body: JSON.stringify({ jobId }) });
+        if (!res) return;
+        const d = await res.json();
+        notify(d.cancelled ? 'Cancelled' : 'Too late — the phone already took it');
+        loadOutbox();
+        loadSendOptions();
+    }
+
+    // One delegated handler for the whole panel: no data reaches inline JS.
+    document.addEventListener('click', (e) => {
+        const s = e.target.closest('[data-sender]');
+        if (s && !s.disabled) {
+            sendFromKey = s.getAttribute('data-sender');
+            const from = currentSender();
+            if (from) sendRecipients = sendRecipients.filter(r => r.number !== from.number);
+            renderSendForm();
+            return;
+        }
+        const u = e.target.closest('[data-adduser]');
+        if (u && sendOpts) {
+            const user = (sendOpts.directory || []).find(x => x.userId === u.getAttribute('data-adduser'));
+            if (!user) return;
+            const ok = user.sims.filter(x => !x.unconfirmed);
+            if (!ok.length) {
+                document.getElementById('sendToNote').textContent =
+                    user.name + ' has no confirmed SIM — a changed SIM must be saved on the phone first.';
+                return;
+            }
+            for (const x of ok) addRecipients([x.number], `${user.name} · ${x.deviceName} · SIM ${x.slot}`);
+            if (ok.length < user.sims.length) document.getElementById('sendToNote').textContent =
+                'An unconfirmed SIM of ' + user.name + ' was left out.';
+            return;
+        }
+        const r = e.target.closest('[data-remove]');
+        if (r) {
+            sendRecipients = sendRecipients.filter(x => x.number !== r.getAttribute('data-remove'));
+            renderRecipients();
+            return;
+        }
+        const c = e.target.closest('[data-cancel-job]');
+        if (c) cancelJob(c.getAttribute('data-cancel-job'));
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.target && e.target.id === 'sendTyped') { e.preventDefault(); addTypedRecipients(); }
+    });
 
     function notify(msg) {
         const el = document.getElementById('notification');

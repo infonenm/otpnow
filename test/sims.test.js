@@ -239,12 +239,18 @@ const register = (deviceId, sims, extra) => req('POST', '/api/register', {
                                     simLog: [] }] };
     users.loadCache(JSON.parse(JSON.stringify(storedDoc)));
     assert.strictEqual(users.isLoaded(), false);
-    users.registerDevice(A, { sims: [sim(1, '01700000002'), sim(2, '')] });
+    storedDoc.devices[0].canSendSms = null;
+    storedDoc.devices[0].appVersion = '4.34.0';
+    users.loadCache(JSON.parse(JSON.stringify(storedDoc)));
+    users.registerDevice(A, { sims: [sim(1, '01700000002'), sim(2, '')],
+                              canSendSms: true, appVersion: '4.36.0' });
     writes = 0;
     users.load(JSON.parse(JSON.stringify(storedDoc)));        // Firestore: still the old SIM
     d = users.getDevice(A);
     assert.strictEqual(d.sims[0].number, '01700000002',
         'the live report outranks the older stored copy');
+    assert.strictEqual(d.canSendSms, true, 'and so does what the same report said it can do (review #4)');
+    assert.strictEqual(d.appVersion, '4.36.0');
     assert.ok(writes > 0, 'and is written back');
     // A reload with nothing newer in memory does not write.
     writes = 0;
