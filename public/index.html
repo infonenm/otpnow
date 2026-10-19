@@ -1139,15 +1139,16 @@
         } catch (e) { err.textContent = 'Network error'; }
     }
 
+    let loggingIn = false;          // two Enter presses = two sessions and two streams (audit, 4.42.1)
+    let lastLoginError = 'Wrong password';
     async function doLogin() {
         const pw = document.getElementById('passwordInput').value.trim();
-        if (!pw) return;
-        const ok = await loginWithPassword(pw);
-        if (ok) {
-            document.getElementById('loginError').textContent = '';
-        } else {
-            document.getElementById('loginError').textContent = 'Wrong password';
-        }
+        if (!pw || loggingIn) return;
+        loggingIn = true;
+        try {
+            const ok = await loginWithPassword(pw);
+            document.getElementById('loginError').textContent = ok ? '' : lastLoginError;
+        } finally { loggingIn = false; }
     }
 
     async function loginWithPassword(pw) {
@@ -1161,12 +1162,20 @@
                     username: document.getElementById('usernameInput').value.trim()
                 })
             });
-            if (!res.ok) return false;
+            if (!res.ok) {
+                // 429 = too many attempts at once (server 4.42.1) — not a wrong password.
+                let why = 'Wrong password';
+                if (res.status === 429) { try { why = (await res.json()).error || why; } catch (e) { } }
+                lastLoginError = why;
+                return false;
+            }
             const data = await res.json();
             token = data.token;
             me = { userId: data.userId || 'admin', role: data.role || 'admin' };
             localStorage.setItem('getotp_token', token);
-            tryConnect();
+            // Awaited: the login screen stays up until this finishes, and an
+            // Enter in that gap created a second session (review of 4.38.4).
+            await tryConnect();
             return true;
         } catch (e) { return false; }
     }
@@ -1178,6 +1187,7 @@
         localStorage.removeItem('getotp_token');
         // (A sessionStorage 'getotp_pw' key used to be cleared here. Nothing has
         // written it since the password stopped being stored client-side.)
+        sseGen++; clearTimeout(sseRetryTimer); sseRetryCount = 0; sseEverOpened = false;
         if (eventSource) { eventSource.close(); eventSource = null; }
         allMessages = {};
         // NOTHING of this session may reach the next one on this browser
@@ -1261,22 +1271,85 @@
     // ═══════════════════════════════════════════════════════════
     let sseRetryCount = 0;
 
+    /*
+     * RECONNECTING IS OURS, NOT THE BROWSER'S (audit, 4.42.1 — reproduced).
+     *
+     * The ticket in the stream URL works once. After any blip (Wi-Fi change,
+     * laptop sleep, a proxy reset, a deploy) EventSource reconnected by itself
+     * with the SAME, spent ticket, got 401, and closed for good: "Disconnected"
+     * until a manual reload, with a perfectly valid session. Now every error
+     * closes the stream and a fresh ticket is fetched after a back-off; a 401
+     * on the TICKET is the session really gone (→ sign in). After a reconnect
+     * the messages and the outbox are re-read: anything that happened during
+     * the gap — new, changed or deleted — was missed.
+     *
+     * sseGen: a second connectSSE (two Enter presses at login) or a logout
+     * makes the older call stand down after its await instead of opening a
+     * second stream nobody closes.
+     */
+    let sseGen = 0, sseRetryTimer = null, sseEverOpened = false;
+
+    function scheduleSseRetry(gen) {
+        if (gen !== sseGen || !token) return;
+        clearTimeout(sseRetryTimer);
+        const delay = Math.min(30_000, 1000 * Math.pow(2, Math.min(sseRetryCount, 5)));
+        sseRetryCount++;
+        sseRetryTimer = setTimeout(() => { if (gen === sseGen && token) connectSSE(); }, delay);
+    }
+
+    // Ids the stream touched while a resync read was out: those live versions
+    // are newer than the snapshot and win over it (review of 4.38.4).
+    let resyncTouched = null;
+    function noteStreamTouch(id, deleted) {
+        if (resyncTouched) resyncTouched.set(id, deleted ? 'deleted' : 'live');
+    }
+
+    async function resyncAfterGap() {
+        const gen = sseGen;
+        resyncTouched = new Map();
+        try {
+            const res = await fetch('/api/messages', { headers: authHeaders() });
+            // Signed out, or a newer connection, while this was out: the
+            // snapshot belongs to another session — never apply it.
+            if (gen !== sseGen || !token || !res.ok) return;
+            const data = await res.json();
+            if (gen !== sseGen || !token) return;
+            const next = {};
+            (data.messages || []).forEach(m => { next[m.id] = m; });
+            for (const [id, how] of resyncTouched) {
+                if (how === 'deleted') delete next[id];
+                else if (allMessages[id]) next[id] = allMessages[id];
+            }
+            allMessages = next;
+            renderAll();
+        } catch (e) { /* the next event or reconnect tries again */ }
+        finally { resyncTouched = null; }
+        if (gen === sseGen && token) { try { loadOutbox(true); } catch (e) { } }
+    }
+
     async function connectSSE() {
-        if (eventSource) eventSource.close();
+        const gen = ++sseGen;
+        clearTimeout(sseRetryTimer);
+        if (eventSource) { eventSource.close(); eventSource = null; }
         // A single-use ticket rather than the session token: EventSource cannot
         // set headers, and a URL ends up in proxy logs.
         let ticket;
         try {
             const res = await fetch('/api/stream-ticket', { headers: authHeaders() });
-            if (!res.ok) { setConnectionStatus(false); return; }
+            if (gen !== sseGen) return;
+            if (res.status === 401) { notify('Signed out — please sign in again'); doLogout(); return; }
+            if (!res.ok) { setConnectionStatus(false); scheduleSseRetry(gen); return; }
             ticket = (await res.json()).ticket;
-        } catch (e) { setConnectionStatus(false); return; }
+        } catch (e) { if (gen === sseGen) { setConnectionStatus(false); scheduleSseRetry(gen); } return; }
+        if (gen !== sseGen || !token) return;
 
         eventSource = new EventSource('/api/stream?ticket=' + encodeURIComponent(ticket));
+        const es = eventSource;
 
         eventSource.addEventListener('sms_new', e => {
             const sms = JSON.parse(e.data);
             allMessages[sms.id] = sms;
+            noteStreamTouch(sms.id);
             scheduleRender();
             notify('📩 SMS from ' + sms.sender);
         });
@@ -1284,11 +1357,13 @@
         eventSource.addEventListener('sms_update', e => {
             const sms = JSON.parse(e.data);
             allMessages[sms.id] = sms;
+            noteStreamTouch(sms.id);
             scheduleRender();
         });
 
         eventSource.addEventListener('sms_delete', e => {
             const d = JSON.parse(e.data);
+            noteStreamTouch(d.id, true);
             const card = document.querySelector(`[data-id="${d.id}"]`);
             if (card) { card.classList.add('expiring'); setTimeout(() => { delete allMessages[d.id]; scheduleRender(); }, 600); }
             else { delete allMessages[d.id]; scheduleRender(); }
@@ -1375,25 +1450,22 @@
         });
 
         eventSource.onopen = () => {
+            if (gen !== sseGen) return;
+            const reconnect = sseEverOpened;
+            sseEverOpened = true;
             sseRetryCount = 0;
             setConnectionStatus(true);
+            if (reconnect) resyncAfterGap();
         };
 
         eventSource.onerror = () => {
+            if (gen !== sseGen) { es.close(); return; }
             setConnectionStatus(false);
-            sseRetryCount++;
-            // If SSE fails repeatedly, token might be invalid — re-login
-            if (sseRetryCount >= 3) {
-                sseRetryCount = 0;
-                eventSource.close();
-                eventSource = null;
-                // The password is no longer kept, so there is nothing to
-                // re-login WITH. Send the user to the login screen rather than
-                // closing the stream and leaving a dashboard that silently
-                // receives nothing — which is what this did for one revision.
-                notify('Connection lost — please sign in again');
-                showLogin();
-            }
+            // Never let the browser retry with the spent ticket: close, and
+            // come back with a fresh one.
+            es.close();
+            if (eventSource === es) eventSource = null;
+            scheduleSseRetry(gen);
         };
     }
 
@@ -2146,7 +2218,12 @@
     // must never send — and so overwrite — the other's older value.
     function filtersDirty() { return JSON.stringify(configFilters) !== cfgBase.filters; }
     function autoDirty() {
-        return cfgDraftAuto !== null && String(parseInt(cfgDraftAuto, 10)) !== String(cfgBase.autoDelete);
+        if (cfgDraftAuto === null) return false;
+        // An emptied (or unreadable) box is not an edit — it used to save 30
+        // silently (audit 4.38.4; the same rule as OTP Master's ConfigDraft).
+        const v = parseInt(cfgDraftAuto, 10);
+        if (!(v > 0)) return false;
+        return String(v) !== String(cfgBase.autoDelete);
     }
     function configDirty() { return filtersDirty() || autoDirty(); }
 
@@ -2175,6 +2252,9 @@
             if (open) renderConfigFilters();
         }
         if (v.autoDeleteMinutes !== undefined) {
+            // "Changed elsewhere" only when the server's value MOVED — a refresh
+            // re-sending the same value is not a conflict (audit 4.38.4).
+            const moved = String(cfgBase.autoDelete) !== String(v.autoDeleteMinutes);
             autoDeleteMinutes = v.autoDeleteMinutes;
             cfgBase.autoDelete = v.autoDeleteMinutes;
             if (cfgDraftAuto === null) {
@@ -2183,7 +2263,7 @@
                 if (open) document.getElementById('cfgAutoDelete').value = autoDeleteMinutes;
             } else if (String(parseInt(cfgDraftAuto, 10)) === String(v.autoDeleteMinutes)) {
                 cfgDraftAuto = null;                        // the server now has what was typed
-            } else {
+            } else if (moved) {
                 cfgStale = true;
             }
         }
@@ -2394,8 +2474,11 @@
         if (!fs.enabled) {
             rows.push('<span class="fcm-idle">durable storage off — config is lost on redeploy</span>');
         } else if (fs.pendingWrite) {
+            // Config and users/phones keep separate errors (server 4.42.2).
             rows.push('<span class="fcm-bad">saved locally, NOT yet in the cloud</span>'
-                + (fs.lastError ? '<br><span class="fcm-bad">' + esc(fs.lastError) + '</span>' : ''));
+                + (fs.lastError ? '<br><span class="fcm-bad">' + esc(fs.lastError) + '</span>' : '')
+                + (fs.identityError && fs.identityError !== fs.lastError
+                    ? '<br><span class="fcm-bad">users/phones: ' + esc(fs.identityError) + '</span>' : ''));
         } else if (fs.lastWriteAt) {
             const when = new Date(fs.lastWriteAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
             rows.push('<span class="fcm-ok">saved</span> — last write ' + esc(when));
@@ -2706,13 +2789,17 @@
                 fetch('/api/allowed-hosts', { headers: authHeaders() })
             ]);
             if (!u.ok) { adminNotice(await describeFailure(u), true); return; }
+            if (!d.ok) { adminNotice(await describeFailure(d), true); return; }
             const users = (await u.json()).users || [];
             const dev = await d.json();
-            const hosts = (await h.json()).hosts || [];
+            // The hosts list failing must not look like "no hosts" — or wipe the
+            // list on screen (the same rule OTP Master follows).
+            const hosts = h.ok ? ((await h.json()).hosts || []) : null;
+            if (!h.ok) adminNotice('Allowed hosts not loaded: ' + await describeFailure(h), true);
             renderUsers(users);
             window._deviceLimits = { hide: dev.hideAfterDays || 7, del: dev.deleteAfterDays || 15 };
             renderDevices(dev.devices || [], users);
-            renderHosts(hosts);
+            if (hosts) renderHosts(hosts);
         } catch (e) { adminNotice('Could not reach the server', true); }
     }
 
@@ -2859,6 +2946,10 @@
     }
 
     function renderDevices(allDevices, users) {
+        // A redraw resets every dropdown, so a pick not pushed is gone anyway —
+        // left set, it paused the device refresh for the rest of the tab's
+        // life (audit, 4.42.1).
+        window._pushPicked = false;
         const el = document.getElementById('devicesList');
         const copies = findOldCopies(allDevices);
         window._oldCopies = Array.from(copies.entries())
@@ -3030,6 +3121,11 @@
             return `<div class="sim-row"><span class="sim-slot">SIM ${esc(s.slot)}</span>${num}${how}${changed}</div>`;
         });
         for (const c of (d.simConflicts || [])) {
+            if (c.sameDevice) {
+                rows.push(`<div class="sim-row"><span class="bad">⚠ ${esc(c.number)} is on BOTH SIMs of this phone. `
+                    + `One of them is wrong — their OTPs would replace each other. Correct the SIM numbers.</span></div>`);
+                continue;
+            }
             const where = c.devices.map(x => esc(x.name)
                 + (x.slot ? ' (SIM ' + esc(x.slot) + ')' : ' (fallback)')
                 + (x.inactive ? ' — inactive' : '')).join(', ');
@@ -3220,7 +3316,7 @@
             + 'THEIR PHONES STOP FORWARDING — messages arriving on them are not '
             + 'delivered at all until you reactivate.', { ok: 'Deactivate', danger: true }))) return;
         adminPost('/api/users/' + encodeURIComponent(id) + '/active', { active },
-            active ? id + ' reactivated' : id + ' deactivated — their phones now file to admin');
+            active ? id + ' reactivated' : id + ' deactivated — their phones stop forwarding');
     }
 
     async function reissue(id) {
@@ -3405,6 +3501,16 @@
             ]);
             if (!sum.ok) { historyNotice(await describeFailure(sum), true); return; }
             renderStrip(await sum.json());
+            // A failed list read is NOT "nothing matches" (§14b-quinquies): a
+            // user filter needs a Firestore index, and its error says which
+            // (audit, 4.42.1).
+            if (!list.ok) {
+                historyRows = [];
+                document.getElementById('historyList').innerHTML = '';
+                historyNotice(await describeFailure(list), true);
+                return;
+            }
+            historyNotice('');
             historyRows = (await list.json()).messages || [];
             fillHistoryUsers();
             renderHistory();
@@ -4144,11 +4250,20 @@
     }
 
     async function cancelJob(jobId) {
-        const res = await authFetch('/api/send/cancel', { method: 'POST', headers: authHeaders(),
-            body: JSON.stringify({ jobId }) });
-        if (!res) return;
+        let res;
+        try {
+            res = await fetch('/api/send/cancel', { method: 'POST', headers: authHeaders(),
+                body: JSON.stringify({ jobId }) });
+        } catch (e) { notify('⚠️ Network error'); return; }
+        if (res.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
+        if (!res.ok) { notify('⚠️ ' + await describeFailure(res)); return; }
         const d = await res.json();
-        notify(d.cancelled ? 'Cancelled' : 'Too late — the phone already took it');
+        // A job that had already reached the phone becomes "unknown", not
+        // cancelled: it may have gone out (server 4.42.2).
+        const was = outboxJobs[jobId];
+        notify(!d.cancelled ? 'Too late — the phone already took it'
+            : (was && was.dispatchedAt) ? 'Stopped — it had reached the phone once, so it is marked Unknown: check that phone\'s Sent messages'
+            : 'Cancelled');
         loadOutbox();
         loadSendOptions();
     }

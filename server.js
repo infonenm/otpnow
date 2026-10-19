@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.42.0
+ * server.js — GetOTP Render Server v4.42.3
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -41,7 +41,8 @@
  *                         → Send real SMS from a phone's SIM (token auth, scoped by role)
  *   POST /api/test → also wakes the phones; GET /api/test/status → who answered
  *   POST /api/keep-online, GET /api/keep-online → phones stay awake until turned off (admin)
- *   GET  /api/alerts → the admin's recent push alerts (OTP Master)
+ *   GET  /api/alerts → the admin's push alerts of the last 24 h (OTP Master)
+ *   POST /api/alerts/clear → empty that list (admin)
  *   GET  /api/send/pull, POST /api/send/report → the phone's side of sending (API key)
  *   GET  /health          → Keepalive
  *   GET  /                → Dashboard
@@ -188,6 +189,26 @@ app.use((req, res, next) => {
         'Content-Type, Authorization, X-Api-Key, X-Get-Key');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+});
+
+// ─── Shutting down: no new writes ───────────────────────────────
+//
+// shutdown() saves what is pending and exits. A change accepted AFTER that save
+// — a phone's send report, a dashboard edit, a register — was answered 200 and
+// then lost with the process: a report lost that way made a sent SMS end
+// "unknown" and invited a Retry that sends it twice (audit, 4.42.1). /sms has
+// refused since 4.29; every other change now does too. 503 + Retry-After is
+// "try again" to the phone, and the new instance takes it. Reads (/get
+// included) keep working until the very end.
+app.use((req, res, next) => {
+    if (!shuttingDown) return next();
+    const changes = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+    // A pull hands a job to a phone — a change, though it is a GET.
+    if (changes || req.path === '/api/send/pull') {
+        res.setHeader('Retry-After', '5');
+        return res.status(503).json({ error: 'Server restarting — retry' });
+    }
     next();
 });
 
@@ -590,6 +611,49 @@ for (const [name, tokens] of Object.entries(GATEWAYS)) {
 let loginFailures = 0;
 const LOGIN_MAX_DELAY_MS = 5000;
 
+/**
+ * PARALLEL GUESSING (audit 4.42.1, corrected by its review).
+ *
+ * The back-off delayed each failure on its OWN timer, so 500 guesses sent at
+ * once all came back within 5 s — ~100 a second. Now failures are answered ONE
+ * AFTER ANOTHER (nextFailAt): however many arrive together, wrong answers come
+ * out at most one per back-off delay. A queue longer than FAIL_QUEUE_MAX_MS is
+ * refused with 429 at once rather than held open.
+ *
+ * Only FAILURES queue. A correct password is answered immediately whatever is
+ * queued — the first version capped every attempt before checking it, so ten
+ * wrong passwords in flight locked the real admin out.
+ *
+ * The paths that HASH a password (user sign-in, enrollment) also have a cap on
+ * how many hashes run at once: the worker pool is small, and 500 parallel
+ * attempts each hashed first. The admin check is a cheap compare — never capped.
+ */
+let nextFailAt = 0;
+const FAIL_QUEUE_MAX_MS = 30_000;
+let hashing = 0;
+const HASHING_MAX = 8;
+
+/** Run a password-hashing check, or answer 429 when too many are running. */
+async function withHashSlot(res, fn) {
+    if (hashing >= HASHING_MAX) {
+        res.status(429).json({ error: 'Too many sign-in attempts — wait a few seconds and try again' });
+        return { refused: true };
+    }
+    hashing++;
+    try { return { value: await fn() }; }
+    finally { hashing--; }
+}
+
+/** @return false if the queue is too long — answer 429 instead of waiting. */
+async function holdFailure(delay) {
+    const now = Date.now();
+    const at = Math.max(now, nextFailAt) + delay;
+    if (at - now > FAIL_QUEUE_MAX_MS) return false;
+    nextFailAt = at;
+    await new Promise(r => setTimeout(r, at - now));
+    return true;
+}
+
 // Logout: kill the token server-side. Previously the client simply forgot it,
 // so a copied token stayed valid forever.
 app.post('/api/logout', requireToken, (req, res) => {
@@ -602,13 +666,23 @@ app.post('/api/login', asyncRoute(async (req, res) => {
     const { password, username } = req.body || {};
     if (!password) return res.status(400).json({ error: 'Missing password' });
 
-    // username absent = admin, which is exactly today's behaviour.
-    const token = await store.login(password, username);
+    // username absent = admin, which is exactly today's behaviour. Only a
+    // user sign-in hashes; it waits for a slot (see withHashSlot).
+    let token;
+    if (username) {
+        const r = await withHashSlot(res, () => store.login(password, username));
+        if (r.refused) return;
+        token = r.value;
+    } else {
+        token = await store.login(password, username);
+    }
     if (!token) {
         const delay = Math.min(100 * Math.pow(2, loginFailures), LOGIN_MAX_DELAY_MS);
         loginFailures++;
         console.warn(`[server] Failed dashboard login #${loginFailures} — delaying ${delay}ms`);
-        await new Promise(r => setTimeout(r, delay));
+        if (!await holdFailure(delay)) {
+            return res.status(429).json({ error: 'Too many sign-in attempts — wait a few seconds and try again' });
+        }
         return res.status(401).json({ error: 'Wrong password' });
     }
 
@@ -636,7 +710,9 @@ let enrollFailures = 0;
 app.post('/api/set-password', usersGate, requireIdentityLoadedForEnroll,
          asyncRoute(async (req, res) => {
     const { username, code, password } = req.body || {};
-    const r = await store.users.setPassword(username, code, password);
+    const slot = await withHashSlot(res, () => store.users.setPassword(username, code, password));
+    if (slot.refused) return;
+    const r = slot.value;
 
     if (!r.ok) {
         // Same back-off as /api/login, and for the same reason: an enrollment
@@ -649,7 +725,9 @@ app.post('/api/set-password', usersGate, requireIdentityLoadedForEnroll,
         const delay = Math.min(100 * Math.pow(2, enrollFailures), LOGIN_MAX_DELAY_MS);
         enrollFailures++;
         console.warn(`[server] Failed enrollment #${enrollFailures} — delaying ${delay}ms`);
-        await new Promise(t => setTimeout(t, delay));
+        if (!await holdFailure(delay)) {
+            return res.status(429).json({ error: 'Too many attempts — wait a few seconds and try again' });
+        }
         return res.status(400).json({ error: r.error });
     }
     enrollFailures = 0;
@@ -790,8 +868,13 @@ app.get('/api/keep-online', requireAdmin, (req, res) => {
 
 // The admin's recent push alerts (OTP Master, 4.42.0): what was sent, newest
 // last — the in-app list for an admin who muted the notifications.
+// Last 24 h, at most 50 (4.42.1); POST /api/alerts/clear empties it.
 app.get('/api/alerts', requireAdmin, (req, res) => {
     res.json({ alerts: alerts.recent(), topics: alerts.TOPICS });
+});
+
+app.post('/api/alerts/clear', requireAdmin, (req, res) => {
+    res.json({ ok: true, cleared: alerts.clearRecent() });
 });
 
 // The caller's newest Test: which phones answered (woke, or sent the test message).
@@ -1014,6 +1097,10 @@ app.post('/api/users/:id/active', usersGate, requireAdmin, requireIdentityLoaded
     const r = store.users.setActive(req.params.id, active);
     if (!r.ok) return res.status(404).json({ error: r.error });
     const killed = active ? 0 : store.revokeSessionsFor(store.users.slug(req.params.id));
+    // Deactivation ends an override immediately (store.js says so) — it used
+    // to linger, counted as live by the global OFF, and came back on
+    // reactivation (audit, 4.42.1).
+    if (!active) store.cancelOverride(store.users.slug(req.params.id));
     outbox.sweep();          // a deactivated user's queued SMS must not go out
     res.json({ success: true, user: r.user, sessionsRevoked: killed });
 });
@@ -1027,6 +1114,7 @@ app.post('/api/users/:id/purge', usersGate, requireAdmin, requireIdentityLoaded,
     const r = store.users.purgeUser(id);
     if (!r.ok) return res.status(404).json({ error: r.error });
     store.revokeSessionsFor(id);
+    store.cancelOverride(id);   // a new user of the same name must not inherit it
     outbox.sweep();
     res.json({ success: true, unassignedDevices: r.unassignedDevices });
 });
@@ -1247,7 +1335,12 @@ app.post('/api/register', requireApiKey, (req, res) => {
         userId:   store.users.ownerOf(device.id) === store.users.ADMIN_ID
                       ? '' : store.users.ownerOf(device.id),
         claimStatus: store.users.claimStatus(device.id),
-        allowedHosts: store.users.getAllowedHosts()
+        // Same rule as /api/settings: OMITTED when there is no list. An explicit
+        // [] here wiped the list a phone already had (an empty list means "any
+        // host") on every app start — including the request that woke a cold
+        // server before its identity had even loaded (audit, 4.42.1).
+        ...(store.users.getAllowedHosts().length
+              ? { allowedHosts: store.users.getAllowedHosts() } : {})
     });
 });
 
@@ -1290,8 +1383,12 @@ app.get('/api/send/jobs', usersGate, requireToken, (req, res) => {
 app.post('/api/send/cancel', usersGate, requireToken, (req, res) => {
     const { jobId, batchId } = req.body || {};
     if (!jobId && !batchId) return res.status(400).json({ error: 'Give jobId or batchId' });
-    res.json({ success: true, cancelled: outbox.cancel(req.session,
-        { jobId: jobId ? String(jobId) : null, batchId: batchId ? String(batchId) : null }) });
+    const n = outbox.cancel(req.session,
+        { jobId: jobId ? String(jobId) : null, batchId: batchId ? String(batchId) : null });
+    if (n < 0) {
+        return res.status(503).json({ error: 'The send queue is still loading after a restart — try again in a few seconds.' });
+    }
+    res.json({ success: true, cancelled: n });
 });
 
 // Delete finished SMS from the outbox (4.41.3): one, several, or all you may
@@ -1580,7 +1677,7 @@ async function shutdown(signal) {
         if (!st.pendingWrite) break;
         // A write that FAILED will not succeed by being hammered for the next
         // eight seconds; it is logged, and the state file still holds it.
-        if (st.lastWriteOk === false) break;
+        if (st.lastWriteOk === false || st.identityWriteOk === false) break;
         await new Promise(r => setTimeout(r, 50));
     } while (Date.now() < writesDeadline);
     // SMS-failure alerts waiting in their 30 s batch: their jobs are already
@@ -1595,6 +1692,10 @@ async function shutdown(signal) {
         const n = await history.drain(Date.now() + SHUTDOWN_DEADLINE_MS - 1000);
         if (n) console.log(`[server] Archived ${n} message(s) on the way out`);
     } catch (e) { /* logged inside */ }
+    // Once more, last: anything a request already in progress changed while
+    // the archive drained (new changes are refused above with 503).
+    try { await outbox.flush(); } catch (e) { /* logged inside */ }
+    try { await firestore.flushNow(); } catch (e) { /* logged inside */ }
     console.log('[server] Pending writes saved — exiting');
     process.exit(0);
 }

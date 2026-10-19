@@ -115,23 +115,99 @@ const alertPushes = () => pushes.filter(p => p.action === 'admin_alert');
     const fresh = at => { users.getDevice(B).lastSeen = at; users.getDevice(C).lastSeen = at; };
     fresh(t + 23 * 60_000); alerts.check(t + 23 * 60_000);
     assert.strictEqual(alertPushes().length, 2, 'inside the cooldown: silent');
-    // …and still quiet when the cooldown ends → reported then (the last word
-    // must not stay "back online" for a dead phone — review 4.42.0).
+    // A has napped twice now (13 and 12 min, both ended by themselves), so it
+    // is given its longest nap + NAP_MARGIN_MS = 23 min before being reported
+    // (server 4.42.1). Quiet since t+12: at t+29 (17 min) that is still a nap.
     fresh(t + 29 * 60_000); alerts.check(t + 29 * 60_000);
+    assert.strictEqual(alertPushes().length, 2, 'quiet no longer than its usual naps: not reported');
+    // …and still quiet past its usual nap + margin, cooldown over → reported
+    // (the last word must not stay "back online" for a dead phone — review 4.42.0).
+    fresh(t + 36 * 60_000); alerts.check(t + 36 * 60_000);
     ap = alertPushes();
-    assert.strictEqual(ap.length, 3, 'a phone still quiet when the cooldown ends is reported');
+    assert.strictEqual(ap.length, 3, 'quiet longer than any recent nap is reported');
     assert.match(ap[2].data.title, /Infinix X6816C \(rahim\) is offline/);
-    fresh(t + 31 * 60_000); alerts.check(t + 31 * 60_000);
+    assert.match(ap[2].data.body, /usually naps up to 13 min/);
+    fresh(t + 38 * 60_000); alerts.check(t + 38 * 60_000);
     assert.strictEqual(alertPushes().length, 3, 'and only once');
-    users.getDevice(A).lastSeen = t + 32 * 60_000; fresh(t + 32 * 60_000);
-    alerts.check(t + 32 * 60_000);
+    users.getDevice(A).lastSeen = t + 39 * 60_000; fresh(t + 39 * 60_000);
+    alerts.check(t + 39 * 60_000);
     assert.match(alertPushes()[3].data.title, /back online/);
+    // The list knows which phone each offline alert is about (one row per
+    // phone in the app); the push itself never carries it.
+    assert.ok(alerts.recent().filter(a => a.kind === 'offline').every(a => a.device === A));
+    assert.ok(alertPushes().every(p => p.data.device === undefined), 'no device id in a push');
     // A restart while a phone is ALREADY quiet: it was never seen online since,
     // so it is not reported (a restart never alerts).
     alerts._reset();
     users.getDevice(A).lastSeen = t; fresh(t + 40 * 60_000);
     alerts.check(t + 40 * 60_000); fresh(t + 80 * 60_000); alerts.check(t + 80 * 60_000);
     assert.strictEqual(alertPushes().length, 4, 'not seen online since the restart → never reported');
+
+    // ── 1b. naps (4.42.1): learned per phone, capped, forgotten after a day ──
+    {
+        const nap = alerts._reset() || null;
+        const base = alerts.OFFLINE_AFTER_MS;
+        const T0 = t + 100 * 60_000;
+        const others = at => { users.getDevice(B).lastSeen = at; users.getDevice(C).lastSeen = at; };
+        const at = m => T0 + m * 60_000;
+        users.getDevice(A).lastSeen = T0; others(T0); alerts.check(T0);
+        pushes.length = 0;
+        // Nap 1: 30 min. Nothing learned yet → reported at the base threshold.
+        others(at(11)); alerts.check(at(11));
+        assert.strictEqual(alertPushes().length, 1, 'the first nap is reported');
+        users.getDevice(A).lastSeen = at(30); others(at(30)); alerts.check(at(30));
+        assert.strictEqual(alertPushes().length, 2, 'and its end');
+        // Nap 2, the same length, after the cooldown: silent — tolerance 30 + 10.
+        for (let m = 31; m <= 90; m++) { others(at(m)); alerts.check(at(m)); if (m === 69) break; }
+        assert.strictEqual(alertPushes().length, 2, 'a nap like the last one: no push');
+        users.getDevice(A).lastSeen = at(69); others(at(69)); alerts.check(at(69));
+        assert.strictEqual(alertPushes().length, 2, 'and no "back online" either');
+        // A real outage: reported once it outlasts its naps + margin (39 min learned → 49).
+        for (let m = 70; m <= 69 + 48; m++) { others(at(m)); alerts.check(at(m)); }
+        assert.strictEqual(alertPushes().length, 2, 'still within its usual nap + margin');
+        others(at(69 + 50)); alerts.check(at(69 + 50));
+        assert.strictEqual(alertPushes().length, 3, 'past it: reported');
+        // A spell longer than the cap teaches nothing; tolerance never exceeds the cap.
+        users.getDevice(A).lastSeen = at(69 + 200); others(at(69 + 200)); alerts.check(at(69 + 200));
+        const D2 = at(69 + 200);
+        pushes.length = 0;
+        others(D2 + base + 60_000); alerts.check(D2 + base + 60_000);
+        assert.strictEqual(alertPushes().length, 0, 'the earlier naps (≤ 39 min) still apply');
+        others(D2 + 51 * 60_000); alerts.check(D2 + 51 * 60_000);
+        assert.strictEqual(alertPushes().length, 1, 'the 200-min outage did not stretch the tolerance');
+        users.getDevice(A).lastSeen = D2 + 52 * 60_000; others(D2 + 52 * 60_000); alerts.check(D2 + 52 * 60_000);
+        // The cap: a 115-min nap allows 120 min, not 125.
+        const st = { naps: [{ at: D2, ms: 115 * 60_000 }] };
+        assert.strictEqual(alerts._toleranceOf(st, D2), alerts.NAP_CAP_MS);
+        assert.strictEqual(alerts._toleranceOf({ naps: [] }, D2), base, 'no naps: the base threshold');
+        // After a day the naps are forgotten → back to the base threshold.
+        const later = D2 + alerts.NAP_CAP_MS + 25 * 3600_000;
+        users.getDevice(A).lastSeen = later; others(later); alerts.check(later);
+        pushes.length = 0;
+        others(later + base + 60_000); alerts.check(later + base + 60_000);
+        assert.strictEqual(alertPushes().length, 1, 'naps older than a day are forgotten');
+        void nap;
+    }
+    pushes.length = 0;
+    alerts._reset();
+
+    // ── 1c. a REPORTED long outage is not learned as a nap (audit 4.42.1) ──
+    {
+        const T1 = t + 5000 * 60_000;
+        const at = m => T1 + m * 60_000;
+        const others = x => { users.getDevice(B).lastSeen = x; users.getDevice(C).lastSeen = x; };
+        users.getDevice(A).lastSeen = T1; others(T1); alerts.check(T1);
+        pushes.length = 0;
+        others(at(11)); alerts.check(at(11));
+        assert.strictEqual(alertPushes().length, 1, 'the outage is reported');
+        users.getDevice(A).lastSeen = at(110); others(at(110)); alerts.check(at(110));   // back after 110 min
+        assert.strictEqual(alertPushes().length, 2);
+        others(at(110 + 11)); alerts.check(at(110 + 11));
+        assert.strictEqual(alertPushes().length, 3,
+            'the next outage is reported at the base threshold, not after a learned 2 h');
+    }
+    pushes.length = 0;
+    alerts._reset();
 
     // ── 2. removed / long-gone phones are not watched ────────────
     await req('POST', `/api/devices/${C}/remove`, { token: admin, body: {} });
@@ -270,6 +346,27 @@ const alertPushes = () => pushes.filter(p => p.action === 'admin_alert');
     assert.strictEqual(r.status, 200);
     assert.ok(Array.isArray(r.body.alerts) && r.body.alerts.length > 0);
     assert.strictEqual(r.body.topics.offline, 'admin_alert_offline');
+
+    // ── 8. the list holds the last 24 h, at most 50, and can be cleared (4.42.1)
+    {
+        const now = Date.now();
+        alerts._reset();
+        const s = alerts._sent;
+        s.push({ at: now - alerts.RECENT_MS - 60_000, kind: 'offline', title: 'old', body: '' });
+        s.push({ at: now - 3600_000, kind: 'offline', title: 'fresh', body: '' });
+        assert.deepStrictEqual(alerts.recent(now).map(a => a.title), ['fresh'], 'older than 24 h: dropped');
+        for (let i = 0; i < alerts.RECENT_MAX + 10; i++) s.push({ at: now, kind: 'sms', title: 'n' + i, body: '' });
+        const list = alerts.recent(now);
+        assert.strictEqual(list.length, alerts.RECENT_MAX, 'never more than 50');
+        assert.strictEqual(list[list.length - 1].title, 'n' + (alerts.RECENT_MAX + 9), 'the newest are kept');
+
+        assert.strictEqual((await req('POST', '/api/alerts/clear', { token: rahim })).status, 403);
+        r = await req('POST', '/api/alerts/clear', { token: admin });
+        assert.strictEqual(r.status, 200);
+        assert.strictEqual(r.body.cleared, alerts.RECENT_MAX);
+        r = await req('GET', '/api/alerts', { token: admin });
+        assert.strictEqual(r.body.alerts.length, 0, 'cleared');
+    }
 
     console.log('ok — offline/back-online alerts once per change with a cooldown, failed SMS batched once per SMS, '
         + 'a Keep online reminder every 3 h, each kind on its own topic, and no number or text in any push');
