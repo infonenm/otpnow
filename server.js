@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.39.0
+ * server.js — GetOTP Render Server v4.43.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -33,8 +33,20 @@
  *   POST /api/logout      → Revoke the caller's session token (token auth)
  *   POST /api/clear-all   → Delete all SMS (dashboard token auth)
  *   POST /api/filters     → Update filter rules (dashboard token auth)
+ *   GET  /api/teach, POST /api/teach/test, /api/teach/apply, /api/teach/example/delete,
+ *   POST /api/teach/unread/dismiss
+ *                         → Teach from SMS: SMS + code part → verified pattern (admin)
  *   POST /api/auto-delete → Update auto-delete minutes (dashboard token auth)
  *   GET  /api/full-settings→ Full settings for dashboard (dashboard token auth)
+ *   POST /api/register    → Device announces itself + its SIMs (API key)
+ *   GET  /api/send/options, POST /api/send, GET /api/send/jobs, POST /api/send/cancel,
+ *   POST /api/send/retry, POST /api/send/clear
+ *                         → Send real SMS from a phone's SIM (token auth, scoped by role)
+ *   POST /api/test → also wakes the phones; GET /api/test/status → who answered
+ *   POST /api/keep-online, GET /api/keep-online → phones stay awake until turned off (admin)
+ *   GET  /api/alerts → the admin's push alerts of the last 24 h (OTP Master)
+ *   POST /api/alerts/clear → empty that list (admin)
+ *   GET  /api/send/pull, POST /api/send/report → the phone's side of sending (API key)
  *   GET  /health          → Keepalive
  *   GET  /                → Dashboard
  */
@@ -47,6 +59,14 @@ const otp     = require('./lib/otp');
 const fcm     = require('./lib/fcm');
 const firestore = require('./lib/firestore');
 const history   = require('./lib/history');
+const outbox    = require('./lib/outbox');
+const wake      = require('./lib/wake');
+const keepOnline = require('./lib/keeponline');
+const alerts     = require('./lib/alerts');
+const move       = require('./lib/move');
+const teach      = require('./lib/teach');
+/** Random per process: lets a move refuse a target that is this same server. */
+const SERVER_ID  = crypto.randomBytes(8).toString('hex');
 
 // Initialize FCM (silent no-op if FIREBASE_SERVICE_ACCOUNT not set)
 fcm.init();
@@ -60,6 +80,22 @@ firestore.init();
 store.loadDurableConfig();
 store.loadIdentity();
 history.start();
+// The SMS outbox (4.41.0): loads its queue from Firestore, never blocking.
+outbox.start();
+wake.setBroadcast(store.broadcast);
+keepOnline.setBroadcast(store.broadcast);
+// Push alerts to the admin's phone (OTP Master, 4.42.0).
+outbox.setFailureHook(alerts.smsFailed);
+alerts.start();
+// "SMS not read" (4.43.0): a sender rule claimed a message and read no code.
+// Listed for Teach, shown on the dashboard, and pushed to OTP Master when the
+// message plausibly carried a code (not for a plain notice from that sender).
+store.setUnreadHook((sms, rule, likely) => {
+    const { entry } = teach.noteUnread(sms, rule);
+    store.broadcast('teach_unread', { ref: entry.ref, rule: entry.rule, at: entry.at, likely: !!likely },
+        { adminOnly: true });
+    if (likely) alerts.smsUnread(rule);
+});
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -166,6 +202,26 @@ app.use((req, res, next) => {
         'Content-Type, Authorization, X-Api-Key, X-Get-Key');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+});
+
+// ─── Shutting down: no new writes ───────────────────────────────
+//
+// shutdown() saves what is pending and exits. A change accepted AFTER that save
+// — a phone's send report, a dashboard edit, a register — was answered 200 and
+// then lost with the process: a report lost that way made a sent SMS end
+// "unknown" and invited a Retry that sends it twice (audit, 4.42.1). /sms has
+// refused since 4.29; every other change now does too. 503 + Retry-After is
+// "try again" to the phone, and the new instance takes it. Reads (/get
+// included) keep working until the very end.
+app.use((req, res, next) => {
+    if (!shuttingDown) return next();
+    const changes = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+    // A pull hands a job to a phone — a change, though it is a GET.
+    if (changes || req.path === '/api/send/pull') {
+        res.setHeader('Retry-After', '5');
+        return res.status(503).json({ error: 'Server restarting — retry' });
+    }
     next();
 });
 
@@ -307,6 +363,8 @@ app.post('/sms', requireApiKey, (req, res) => {
         const revoked = store.users.isRevoked(deviceId);
         console.log(`[server] Declined SMS from ${sender} — `
             + (revoked ? `device ${deviceId} has been removed` : 'forwarding is OFF'));
+        // Declined, but the phone DID answer a Test: it is awake.
+        if (deviceId && !revoked && sender === 'GetOTP-Test') wake.noteAnswer(deviceId, 'test');
         // globalRaw travels with EVERY state the app is told, not just the poll.
         // Sending only the effective value made an override look like an admin
         // toggle — see the note on globalRaw in /api/settings.
@@ -321,6 +379,8 @@ app.post('/sms', requireApiKey, (req, res) => {
     // app, which is simply not deduplicated — exactly today's behaviour.
     const result = store.addSms(sender, recipient || 'Unknown', message,
                                 arrivedAt || Date.now(), deviceId, msgId);
+    // A Test message is that phone answering a Test (any app version).
+    if (deviceId && sender === 'GetOTP-Test') wake.noteAnswer(deviceId, 'test');
     // `duplicate` is reported but the status stays 200 and `success` stays true,
     // deliberately: this is a message the server already HAS, so the device must
     // mark its row delivered and stop. Anything else would send it round again.
@@ -376,6 +436,13 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // Which dashboard Clear Log this phone has actually carried out — the
         // dashboard shows "log cleared" / "pending" per device from this.
         if (req.query.clearedTs) store.users.noteCleared(req.query.deviceId, req.query.clearedTs);
+        // The newest dashboard Test this phone woke up for (app 4.37.0).
+        if (Number(req.query.wokeTs) > 0) wake.noteAnswer(req.query.deviceId, 'woke', Number(req.query.wokeTs));
+        // Keep online (app 4.37.0): is it holding the phone awake, and may it
+        // (battery "Unrestricted")? Absent from an older app.
+        if (req.query.keepOnline !== undefined) {
+            keepOnline.noteReport(req.query.deviceId, req.query.keepOnline === '1', req.query.battExempt === '1');
+        }
     }
     const cmds = store.commandsFor(req.query.deviceId);
     const pushName = store.usersEnabled() ? store.users.pendingUsernameFor(req.query.deviceId) : null;
@@ -403,16 +470,36 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // no Play Services, so a command that only rode FCM would silently not
         // work on exactly the devices most likely to have missed the SMS.
         fetchLatestTs:    cmds.fetchLatestTs,
+        // "Push to all phones" is carried by this poll (4.42.0): an app that
+        // sees this treats a set_url push only as a signal to poll — so a move
+        // stopped or replaced here is never applied from a late push.
+        moveCarrier:      true,
+        // This server instance, so a move can refuse "moving" to itself.
+        serverId:         SERVER_ID,
         // The server's clock, so the app can tell how OLD each one-shot above
         // is without trusting its own clock. FCM drops a one-shot after two
         // minutes; the poll carrier had no such limit, so a phone that had been
         // offline for twenty minutes ran a twenty-minute-old Test or Get Latest
         // the moment it reconnected. The app applies the same two minutes.
         serverTime:       Date.now(),
+        // Keep online (4.41.3): { on, ts } for THIS phone. The phone holds a
+        // short lease renewed by each poll — see lib/keeponline.js. Omitted
+        // until the switch is used, so an older app and an unused switch see
+        // exactly what they saw before.
+        ...(req.query.deviceId && keepOnline.forDevice(req.query.deviceId)
+              ? { keepOnline: keepOnline.forDevice(req.query.deviceId) } : {}),
         // A username the admin pushed to THIS phone, until the phone confirms it
         // by registering with it. The poll is the carrier that survives a phone
         // without Play Services; FCM (device_<id> topic) is the fast one.
         ...(pushName ? { pushUsername: pushName } : {}),
+        // SMS queued for THIS phone that it may pull now (4.41.0). The carrier
+        // for a phone FCM cannot reach; omitted when there is nothing to send.
+        // A pending "Push to all phones" (4.42.0): repeated on every poll until
+        // the phone has moved (app 4.38.0 applies it once per ts).
+        ...(move.forDevice(req.query.deviceId, id => store.users.ownerOf(id))
+              ? { moveTo: move.forDevice(req.query.deviceId, id => store.users.ownerOf(id)) } : {}),
+        ...(store.usersEnabled() && outbox.dueCount(req.query.deviceId) > 0
+              ? { sendDue: outbox.dueCount(req.query.deviceId) } : {}),
         // OMITTED when unconfigured, rather than sent as [].
         //
         // The app treats an empty list as "not configured" and allows any host —
@@ -537,6 +624,49 @@ for (const [name, tokens] of Object.entries(GATEWAYS)) {
 let loginFailures = 0;
 const LOGIN_MAX_DELAY_MS = 5000;
 
+/**
+ * PARALLEL GUESSING (audit 4.42.1, corrected by its review).
+ *
+ * The back-off delayed each failure on its OWN timer, so 500 guesses sent at
+ * once all came back within 5 s — ~100 a second. Now failures are answered ONE
+ * AFTER ANOTHER (nextFailAt): however many arrive together, wrong answers come
+ * out at most one per back-off delay. A queue longer than FAIL_QUEUE_MAX_MS is
+ * refused with 429 at once rather than held open.
+ *
+ * Only FAILURES queue. A correct password is answered immediately whatever is
+ * queued — the first version capped every attempt before checking it, so ten
+ * wrong passwords in flight locked the real admin out.
+ *
+ * The paths that HASH a password (user sign-in, enrollment) also have a cap on
+ * how many hashes run at once: the worker pool is small, and 500 parallel
+ * attempts each hashed first. The admin check is a cheap compare — never capped.
+ */
+let nextFailAt = 0;
+const FAIL_QUEUE_MAX_MS = 30_000;
+let hashing = 0;
+const HASHING_MAX = 8;
+
+/** Run a password-hashing check, or answer 429 when too many are running. */
+async function withHashSlot(res, fn) {
+    if (hashing >= HASHING_MAX) {
+        res.status(429).json({ error: 'Too many sign-in attempts — wait a few seconds and try again' });
+        return { refused: true };
+    }
+    hashing++;
+    try { return { value: await fn() }; }
+    finally { hashing--; }
+}
+
+/** @return false if the queue is too long — answer 429 instead of waiting. */
+async function holdFailure(delay) {
+    const now = Date.now();
+    const at = Math.max(now, nextFailAt) + delay;
+    if (at - now > FAIL_QUEUE_MAX_MS) return false;
+    nextFailAt = at;
+    await new Promise(r => setTimeout(r, at - now));
+    return true;
+}
+
 // Logout: kill the token server-side. Previously the client simply forgot it,
 // so a copied token stayed valid forever.
 app.post('/api/logout', requireToken, (req, res) => {
@@ -549,13 +679,23 @@ app.post('/api/login', asyncRoute(async (req, res) => {
     const { password, username } = req.body || {};
     if (!password) return res.status(400).json({ error: 'Missing password' });
 
-    // username absent = admin, which is exactly today's behaviour.
-    const token = await store.login(password, username);
+    // username absent = admin, which is exactly today's behaviour. Only a
+    // user sign-in hashes; it waits for a slot (see withHashSlot).
+    let token;
+    if (username) {
+        const r = await withHashSlot(res, () => store.login(password, username));
+        if (r.refused) return;
+        token = r.value;
+    } else {
+        token = await store.login(password, username);
+    }
     if (!token) {
         const delay = Math.min(100 * Math.pow(2, loginFailures), LOGIN_MAX_DELAY_MS);
         loginFailures++;
         console.warn(`[server] Failed dashboard login #${loginFailures} — delaying ${delay}ms`);
-        await new Promise(r => setTimeout(r, delay));
+        if (!await holdFailure(delay)) {
+            return res.status(429).json({ error: 'Too many sign-in attempts — wait a few seconds and try again' });
+        }
         return res.status(401).json({ error: 'Wrong password' });
     }
 
@@ -583,7 +723,9 @@ let enrollFailures = 0;
 app.post('/api/set-password', usersGate, requireIdentityLoadedForEnroll,
          asyncRoute(async (req, res) => {
     const { username, code, password } = req.body || {};
-    const r = await store.users.setPassword(username, code, password);
+    const slot = await withHashSlot(res, () => store.users.setPassword(username, code, password));
+    if (slot.refused) return;
+    const r = slot.value;
 
     if (!r.ok) {
         // Same back-off as /api/login, and for the same reason: an enrollment
@@ -596,7 +738,9 @@ app.post('/api/set-password', usersGate, requireIdentityLoadedForEnroll,
         const delay = Math.min(100 * Math.pow(2, enrollFailures), LOGIN_MAX_DELAY_MS);
         enrollFailures++;
         console.warn(`[server] Failed enrollment #${enrollFailures} — delaying ${delay}ms`);
-        await new Promise(t => setTimeout(t, delay));
+        if (!await holdFailure(delay)) {
+            return res.status(429).json({ error: 'Too many attempts — wait a few seconds and try again' });
+        }
         return res.status(400).json({ error: r.error });
     }
     enrollFailures = 0;
@@ -676,6 +820,9 @@ function commandTarget(req) {
     if (req.session.role !== 'admin') return req.session.userId;
     const t = (req.body || {}).target;
     if (t === undefined || t === null || t === '' || t === 'all') return null;
+    // Users switched off: there are no users to target, and a user topic would
+    // reach nobody while the dashboard said otherwise (review, 4.41.3).
+    if (!store.usersEnabled()) return false;
 
     const id = store.users.slug(t);
     if (!id) return false;
@@ -707,7 +854,45 @@ app.post('/api/test', requireToken, (req, res) => {
     if (rejectBadTarget(target, res)) return;
     const ts = store.triggerTestMessage(Date.now(), target);
     fcm.send('test', ts, topicFor(target));
-    res.json({ success: true, target: target || 'all' });
+    // Which phones it was aimed at, so the dashboard can show who answers
+    // (4.41.3: Test also wakes a sleeping phone — app 4.37.0).
+    const run = wake.start(ts, target, req.session);
+    res.json({ success: true, target: target || 'all', run });
+});
+
+// Keep online (4.41.3, admin only): phones stay awake until turned off.
+// { on: true, target } / { on: false }. The push is a signal — the phone asks
+// /api/settings for the state, so a stale or late push cannot turn it on.
+app.post('/api/keep-online', requireAdmin, (req, res) => {
+    const on = (req.body || {}).on === true;
+    let target = null;
+    if (on) {
+        target = commandTarget(req);
+        if (rejectBadTarget(target, res)) return;
+    }
+    const r = keepOnline.set(on, target, req.session);
+    for (const t of r.topicTargets) fcm.send('keep_online', r.status.ts, topicFor(t));
+    res.json({ success: true, status: r.status });
+});
+
+app.get('/api/keep-online', requireAdmin, (req, res) => {
+    res.json({ status: keepOnline.status() });
+});
+
+// The admin's recent push alerts (OTP Master, 4.42.0): what was sent, newest
+// last — the in-app list for an admin who muted the notifications.
+// Last 24 h, at most 50 (4.42.1); POST /api/alerts/clear empties it.
+app.get('/api/alerts', requireAdmin, (req, res) => {
+    res.json({ alerts: alerts.recent(), topics: alerts.TOPICS });
+});
+
+app.post('/api/alerts/clear', requireAdmin, (req, res) => {
+    res.json({ ok: true, cleared: alerts.clearRecent() });
+});
+
+// The caller's newest Test: which phones answered (woke, or sent the test message).
+app.get('/api/test/status', requireToken, (req, res) => {
+    res.json({ run: wake.status(req.session) });
 });
 
 // Force the device to fetch and forward its newest SMS.
@@ -805,7 +990,119 @@ app.post('/api/filters', requireAdmin, (req, res) => {
     }
 
     store.setFilters(filters);
+    teach.resolveUnread(store.getSettings().filters);
+    // Taught examples these filters now read wrong. A WARNING, not a refusal:
+    // removing a format on purpose must stay possible — but never silently.
+    const warnings = teach.brokenExamples(store.getSettings().filters, store.getFilterExamples());
+    res.json({ success: true, warnings });
+});
+
+// ═════════════════════════════════════════════════════════════════
+//  Teach from SMS (4.43.0) — admin only. See lib/teach.js.
+// ═════════════════════════════════════════════════════════════════
+
+function teachAnalysis(body) {
+    const b = body || {};
+    // Until the SAVED filters are known, the running ones may be the env
+    // catch-all — and Add writes the whole filter set back. Taught during a
+    // cold start or a Firestore outage, that wiped the saved rules and examples
+    // (review, 4.43.0). Refused instead, with the reason.
+    if (!store.teachReady()) {
+        return { ok: false, canApply: false, status: 503,
+                 error: 'The saved filters have not loaded yet (server starting, or Firestore unreachable). '
+                      + 'Teach is off until they have — try again in a moment. Settings → Config storage shows why.' };
+    }
+    return teach.analyze({
+        message: b.message, otpPart: b.otpPart, rule: b.rule, sender: b.sender, recipient: b.recipient,
+        filters: store.getSettings().filters,
+        examples: store.getFilterExamples(),
+        recent: store.recentMessages(200)
+    });
+}
+
+/** The analysis as the client sees it: the full proposed filter set stays here. */
+function publicAnalysis(a) {
+    const out = Object.assign({}, a);
+    delete out.proposedFilters;
+    return out;
+}
+
+app.get('/api/teach', requireAdmin, (req, res) => {
+    const filters = store.getSettings().filters;
+    res.json({
+        unread:   teach.listUnread(),
+        examples: store.getFilterExamples(),
+        // Sender rules to choose from — DEFAULT is never taught.
+        rules:    filters.filter(r => r && r.phoneNumber !== 'DEFAULT').map(r => String(r.phoneNumber)),
+        broken:   teach.brokenExamples(filters, store.getFilterExamples())
+    });
+});
+
+app.post('/api/teach/test', requireAdmin, (req, res) => {
+    const a = teachAnalysis(req.body);
+    res.status(a.ok ? 200 : (a.status || 400)).json(publicAnalysis(a));
+});
+
+app.post('/api/teach/apply', requireAdmin, (req, res) => {
+    const body = req.body || {};
+    // Add applies only what a Test showed: no basedOn, no Add.
+    if (typeof body.basedOn !== 'string' || !body.basedOn) {
+        return res.status(400).json({ error: 'Press Test first — Add applies exactly what Test showed.' });
+    }
+    const a = teachAnalysis(body);
+    if (!a.ok) return res.status(a.status || 400).json(publicAnalysis(a));
+    // Test showed one thing; apply must do exactly that or nothing. Another
+    // admin's save (or a Teach) in between makes the preview stale.
+    if (body.basedOn !== a.basedOn) {
+        return res.status(409).json(Object.assign(publicAnalysis(a), {
+            error: 'The filters changed after you pressed Test. Here is the result with the current filters — '
+                 + 'check it and press Add again.' }));
+    }
+    if (!a.canApply) {
+        return res.status(400).json(Object.assign(publicAnalysis(a), {
+            error: 'Not added — it would break a message that reads correctly today', problems: a.blocked }));
+    }
+    // The same gate as a manual save: nothing reaches the running filters
+    // without passing it.
+    const problems = [];
+    for (const rule of a.proposedFilters) {
+        const why = otp.validateRule(rule);
+        if (why) { problems.push(`${rule.phoneNumber}: ${why}`); continue; }
+        for (const p of rule.patterns || []) {
+            const w = otp.validatePattern(p);
+            if (w) problems.push(`${rule.phoneNumber}: ${w}`);
+        }
+    }
+    if (problems.length) return res.status(400).json({ error: 'Some patterns would never match', problems });
+
+    const message = String(body.message).replace(/\r\n/g, '\n');
+    const examples = teach.addExample(store.getFilterExamples(),
+        { rule: a.rule, sender: a.sender, recipient: a.recipient, message, code: a.code, at: Date.now() });
+    store.setFilters(a.proposedFilters, examples);
+    const resolved = teach.resolveUnread(store.getSettings().filters);
+    store.broadcast('teach_change', { at: Date.now() }, { adminOnly: true });
+    // The SMS that is waiting right now (if it is still in its OTP window) was
+    // re-read by setFilters — say so, because that is the OTP someone needs.
+    const waiting = store.recentMessages(200).reverse().find(m => m.message === String(body.message) && m.code);
+    console.log(`[teach] ${a.rule}: added ${JSON.stringify(a.pattern)} — code ${a.code}`);
+    res.json({ success: true, rule: a.rule, code: a.code, pattern: a.pattern, resolvedUnread: resolved,
+               waitingNowReads: waiting ? waiting.code : null });
+});
+
+app.post('/api/teach/example/delete', requireAdmin, (req, res) => {
+    const { rule, at } = req.body || {};
+    if (typeof rule !== 'string' || !rule.trim()) return res.status(400).json({ error: 'rule required' });
+    const r = teach.removeExample(store.getFilterExamples(), rule, at);
+    if (!r.removed) return res.status(404).json({ error: 'No such example — it may have been deleted already' });
+    store.setFilterExamples(r.examples);
+    store.broadcast('teach_change', { at: Date.now() }, { adminOnly: true });
     res.json({ success: true });
+});
+
+app.post('/api/teach/unread/dismiss', requireAdmin, (req, res) => {
+    const { ref } = req.body || {};
+    if (typeof ref !== 'string') return res.status(400).json({ error: 'ref required' });
+    res.json({ success: teach.dismissUnread(ref) });
 });
 
 // Update auto-delete minutes
@@ -925,6 +1222,11 @@ app.post('/api/users/:id/active', usersGate, requireAdmin, requireIdentityLoaded
     const r = store.users.setActive(req.params.id, active);
     if (!r.ok) return res.status(404).json({ error: r.error });
     const killed = active ? 0 : store.revokeSessionsFor(store.users.slug(req.params.id));
+    // Deactivation ends an override immediately (store.js says so) — it used
+    // to linger, counted as live by the global OFF, and came back on
+    // reactivation (audit, 4.42.1).
+    if (!active) store.cancelOverride(store.users.slug(req.params.id));
+    outbox.sweep();          // a deactivated user's queued SMS must not go out
     res.json({ success: true, user: r.user, sessionsRevoked: killed });
 });
 
@@ -937,6 +1239,8 @@ app.post('/api/users/:id/purge', usersGate, requireAdmin, requireIdentityLoaded,
     const r = store.users.purgeUser(id);
     if (!r.ok) return res.status(404).json({ error: r.error });
     store.revokeSessionsFor(id);
+    store.cancelOverride(id);   // a new user of the same name must not inherit it
+    outbox.sweep();
     res.json({ success: true, unassignedDevices: r.unassignedDevices });
 });
 
@@ -959,7 +1263,10 @@ app.post('/api/set-url', usersGate, requireAdmin, (req, res) => {
     }
     const host = raw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase();
     const allowed = store.users.getAllowedHosts();
-    if (allowed.length && !allowed.includes(host)) {
+    // 4.42.0: REQUIRED, not "if configured". The check below sends this
+    // server's API key and admin password to the new host; a typo must never
+    // send them to a stranger's address — only to a host you listed.
+    if (!allowed.includes(host)) {
         return res.status(400).json({
             error: `"${host}" is not on the allowed hosts list, so every phone would `
                  + `refuse it. Add it under Allowed server hosts first.`
@@ -975,14 +1282,38 @@ app.post('/api/set-url', usersGate, requireAdmin, (req, res) => {
             return res.status(400).json({ error: 'Unknown target user. Omit it, or use "all".' });
         }
     }
-    fcm.send('set_url', Date.now(), who ? 'user_' + who : undefined, { url: raw });
-    console.warn(`[server] set_url pushed: ${raw} -> ${who || 'all devices'}`);
-    res.json({
-        success: true, url: raw, target: who || 'all',
-        // Honest about what was actually achieved: FCM accepted a message.
-        note: 'Pushed. Phones without Play Services, or force-stopped, will not '
-            + 'receive this — change those by hand in the app.'
-    });
+    // 4.42.0: check the new server FIRST (reachable, same API key), then keep
+    // the move pending here so every phone gets it on its next poll too — see
+    // lib/move.js. Async: the check can take a while on a sleeping instance.
+    // One at a time: a slow check finishing after a newer move must not undo it.
+    if (moveInFlight) return res.status(409).json({ error: 'Another move is being checked — wait for it to finish.' });
+    moveInFlight = true;
+    (async () => {
+        const pre = await move.preflight(raw, process.env.API_KEY, process.env.DASHBOARD_PASSWORD,
+                                         undefined, undefined, SERVER_ID);
+        if (!pre.ok) return res.status(400).json({ error: pre.error });
+        const ts = Date.now();
+        move.set(raw, ts, who, (req.session && req.session.userId) || 'admin');
+        fcm.send('set_url', ts, who ? 'user_' + who : undefined, { url: raw });
+        store.broadcast('settings_change', { key: 'serverMove', value: move.status() }, { adminOnly: true });
+        console.warn(`[server] set_url pushed: ${raw} -> ${who || 'all devices'} (pending on the poll too)`);
+        res.json({
+            success: true, url: raw, target: who || 'all', move: move.status(), warnings: pre.warnings,
+            note: 'Moving. Phones move now by push, and any that miss it move on their next '
+                + 'check-in with this server (app 4.38.0+). Keep this server running until they have.'
+                + (pre.warnings.length ? ' ' + pre.warnings.join(' ') : '')
+        });
+    })().catch(e => { console.error('[server] set-url:', e); if (!res.headersSent) res.status(500).json({ error: 'Move failed: ' + e.message }); })
+        .finally(() => { moveInFlight = false; });
+});
+let moveInFlight = false;
+
+// Stop a pending move: phones not yet moved stay here. Phones that moved stay
+// moved — push this server's address from the new one to bring them back.
+app.post('/api/set-url/cancel', usersGate, requireAdmin, (req, res) => {
+    const was = move.clear();
+    store.broadcast('settings_change', { key: 'serverMove', value: null }, { adminOnly: true });
+    res.json({ success: true, cancelled: !!was });
 });
 
 // Force a re-read of config and identity from Firestore.
@@ -1013,6 +1344,7 @@ app.post('/api/devices/:id/assign', usersGate, requireAdmin, requireIdentityLoad
     const { userId } = req.body || {};
     const r = store.users.assignDevice(req.params.id, userId === null ? null : userId);
     if (!r.ok) return res.status(400).json({ error: r.error });
+    outbox.sweep();          // a reassigned phone does not send its old owner's queue
     res.json({ success: true, device: r.device });
 });
 
@@ -1060,6 +1392,7 @@ app.post('/api/devices/:id/sim', usersGate, requireAdmin, requireIdentityLoaded,
 app.post('/api/devices/:id/remove', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
     const r = store.users.removeDevice(req.params.id);
     if (!r.ok) return res.status(404).json({ error: 'No such device' });
+    outbox.sweep();
     res.json({ success: true });
 });
 
@@ -1092,8 +1425,20 @@ app.post('/api/register', requireApiKey, (req, res) => {
         // say so plainly rather than 404ing an app that will retry forever.
         return res.json({ success: true, usersEnabled: false });
     }
-    const { deviceId, model, name, claimedUser, installId } = req.body || {};
-    const device = store.users.registerDevice(deviceId, { model, name, claimedUser, installId });
+    const { deviceId, model, name, claimedUser, installId, sims, canSendSms, appVersion } = req.body || {};
+    // SIM 1 / SIM 2 as the phone has them (app 4.35.0). Passed through ONLY
+    // when it is a list: an older app sends nothing, and "nothing" must keep
+    // what is stored rather than read as "both slots empty".
+    const simsBefore = store.users.simsVersion();
+    const device = store.users.registerDevice(deviceId, {
+        model, name, claimedUser, installId,
+        sims: Array.isArray(sims) ? sims : undefined,
+        // Can this phone send for the dashboard (app 4.36.0)? Absent = keep.
+        canSendSms: typeof canSendSms === 'boolean' ? canSendSms : undefined,
+        appVersion: typeof appVersion === 'string' ? appVersion : undefined
+    });
+    // An open Users & Devices panel shows the change without a reload.
+    if (store.users.simsVersion() !== simsBefore) store.notifyDevicesChanged();
 
     // REMOVED, and not reactivated by this attempt. 200 rather than 403 on
     // purpose: the app reads 401/403 from this server as "the API key is
@@ -1115,8 +1460,97 @@ app.post('/api/register', requireApiKey, (req, res) => {
         userId:   store.users.ownerOf(device.id) === store.users.ADMIN_ID
                       ? '' : store.users.ownerOf(device.id),
         claimStatus: store.users.claimStatus(device.id),
-        allowedHosts: store.users.getAllowedHosts()
+        // Same rule as /api/settings: OMITTED when there is no list. An explicit
+        // [] here wiped the list a phone already had (an empty list means "any
+        // host") on every app start — including the request that woke a cold
+        // server before its identity had even loaded (audit, 4.42.1).
+        ...(store.users.getAllowedHosts().length
+              ? { allowedHosts: store.users.getAllowedHosts() } : {})
     });
+});
+
+// ═════════════════════════════════════════════════════════════════
+// SEND SMS FROM THE DASHBOARD (server 4.41.0) — see lib/outbox.js
+// ═════════════════════════════════════════════════════════════════
+//
+// Dashboard side: any signed-in caller, scoped by role inside the outbox (a user
+// sends only from their own phones, and only when the admin has switched it on).
+// Phone side: the API key, plus the device id the job was queued for.
+
+// What the composer may offer this caller.
+app.get('/api/send/options', usersGate, requireToken, (req, res) => {
+    res.json(outbox.options(req.session));
+});
+
+app.post('/api/send', usersGate, requireToken, (req, res) => {
+    // Only the public fields: retryOf / expectFromNumber are set by /retry alone.
+    const { fromDeviceId, fromSlot, to, message } = req.body || {};
+    const r = outbox.createBatch(req.session, { fromDeviceId, fromSlot, to, message });
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error, problems: r.problems, skipped: r.skipped });
+    res.json({ success: true, batchId: r.batchId, jobs: r.jobs, skipped: r.skipped });
+});
+
+// Retry one failed SMS as a NEW job (4.41.2): same SIM, recipient and text,
+// every send check applied again, at most once per job. See outbox.retry.
+app.post('/api/send/retry', usersGate, requireToken, (req, res) => {
+    const { jobId } = req.body || {};
+    if (!jobId) return res.status(400).json({ error: 'Give jobId' });
+    const r = outbox.retry(req.session, String(jobId));
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error, skipped: r.skipped });
+    res.json({ success: true, batchId: r.batchId, jobs: r.jobs });
+});
+
+app.get('/api/send/jobs', usersGate, requireToken, (req, res) => {
+    res.json({ jobs: outbox.list(req.session, req.query.limit),
+               quota: outbox.options(req.session).quota });
+});
+
+app.post('/api/send/cancel', usersGate, requireToken, (req, res) => {
+    const { jobId, batchId } = req.body || {};
+    if (!jobId && !batchId) return res.status(400).json({ error: 'Give jobId or batchId' });
+    const n = outbox.cancel(req.session,
+        { jobId: jobId ? String(jobId) : null, batchId: batchId ? String(batchId) : null });
+    if (n < 0) {
+        return res.status(503).json({ error: 'The send queue is still loading after a restart — try again in a few seconds.' });
+    }
+    res.json({ success: true, cancelled: n });
+});
+
+// Delete finished SMS from the outbox (4.41.3): one, several, or all you may
+// clear. Text and number are erased at once; see outbox.clear.
+app.post('/api/send/clear', usersGate, requireToken, (req, res) => {
+    const { jobIds, all } = req.body || {};
+    const r = outbox.clear(req.session, { jobIds: Array.isArray(jobIds) ? jobIds : undefined, all: all === true });
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error });
+    res.json({ success: true, cleared: r.cleared });
+});
+
+// Admin: who may send, and how many per day.
+app.post('/api/users/:id/send', usersGate, requireAdmin, requireIdentityLoaded, (req, res) => {
+    const { enabled, dailyLimit } = req.body || {};
+    const r = store.users.setSendPermission(req.params.id, { enabled, dailyLimit });
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    // Switched off: their queued SMS expire NOW, not when a phone next asks.
+    outbox.sweep();
+    res.json({ success: true, user: r.user });
+});
+
+// The phone takes its next jobs. A removed device gets nothing.
+app.get('/api/send/pull', usersGate, requireApiKey, (req, res) => {
+    const deviceId = String(req.query.deviceId || '');
+    if (!/^[a-f0-9]{16}$/i.test(deviceId)) return res.status(400).json({ error: 'deviceId required' });
+    store.users.noteInstall(deviceId, req.query.installId);
+    if (store.users.isRevoked(deviceId)) return res.json({ jobs: [], revoked: true });
+    store.users.touchDevice(deviceId);
+    res.json({ jobs: outbox.pull(deviceId) });
+});
+
+// The phone reports what happened to a job.
+app.post('/api/send/report', usersGate, requireApiKey, (req, res) => {
+    const b = req.body || {};
+    const r = outbox.report(String(b.deviceId || ''), b);
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error });
+    res.json({ success: true, status: r.job.status });
 });
 
 // ═════════════════════════════════════════════════════════════════
@@ -1219,6 +1653,9 @@ app.get('/api/full-settings', requireToken, (req, res) => {
         fcm:     isAdmin ? fcm.getStatus() : null,
         config:  isAdmin ? store.configStatus() : null,
         history: isAdmin ? history.stats() : null,
+        outbox:  isAdmin ? outbox.stats() : null,
+        // A "Push to all phones" still being delivered (4.42.0), or null.
+        serverMove: isAdmin ? move.status() : null,
         identity: !store.usersEnabled() ? null : (isAdmin
             ? Object.assign(store.users.stats(), { overrides: store.listOverrides(),
                                                    overrideCeiling: store.overrideCeilingMinutes() })
@@ -1365,13 +1802,25 @@ async function shutdown(signal) {
         if (!st.pendingWrite) break;
         // A write that FAILED will not succeed by being hammered for the next
         // eight seconds; it is logged, and the state file still holds it.
-        if (st.lastWriteOk === false) break;
+        if (st.lastWriteOk === false || st.identityWriteOk === false) break;
         await new Promise(r => setTimeout(r, 50));
     } while (Date.now() < writesDeadline);
+    // SMS-failure alerts waiting in their 30 s batch: their jobs are already
+    // marked alerted (and saved so below), so a batch lost here is lost for
+    // good. Send it first, bounded (review, 4.42.0).
+    try {
+        await Promise.race([alerts.flushSms(), new Promise(r => setTimeout(r, 2000))]);
+    } catch (e) { /* fcm.send logs */ }
+    // The outbox queue: a job created just before a deploy must survive it.
+    try { await outbox.flush(); } catch (e) { /* logged inside */ }
     try {
         const n = await history.drain(Date.now() + SHUTDOWN_DEADLINE_MS - 1000);
         if (n) console.log(`[server] Archived ${n} message(s) on the way out`);
     } catch (e) { /* logged inside */ }
+    // Once more, last: anything a request already in progress changed while
+    // the archive drained (new changes are refused above with 503).
+    try { await outbox.flush(); } catch (e) { /* logged inside */ }
+    try { await firestore.flushNow(); } catch (e) { /* logged inside */ }
     console.log('[server] Pending writes saved — exiting');
     process.exit(0);
 }
