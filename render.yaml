@@ -19,6 +19,12 @@ services:
     # pending write first (server 4.37.0).
     healthCheckPath: /health
     envVars:
+      # firebase-admin 14 (server 4.43.2) needs Node 22+. Render takes the
+      # FIRST of: NODE_VERSION (here / the dashboard), .node-version, .nvmrc,
+      # package.json engines ("22"). A NODE_VERSION left at 20 in the
+      # dashboard would override this — server.js logs a loud error if so.
+      - key: NODE_VERSION
+        value: "22"
       - key: NODE_ENV
         value: production
       - key: DASHBOARD_PASSWORD
@@ -37,10 +43,11 @@ services:
       - key: GATEWAYS
         sync: false
       # Used only when neither the state file nor Firestore has filters. The
-      # three recommended rules from FILTERS.md rather than the bare catch-all,
-      # which extracts payment amounts as codes.
+      # recommended rules from FILTERS.md (DEFAULT + the IVACBD rule, 4.43.0)
+      # rather than the bare catch-all, which extracts payment amounts as codes.
+      # test/recommended-filters.test.js checks this exact value.
       - key: OTP_PATTERNS
-        value: '[{"phoneNumber":"DEFAULT","patterns":["\\bis\\s+(\\d{4,8})\\b","\\b(?:OTP|One[- ]?Time Password|PIN|code)\\b[^0-9]{0,25}(\\d{4,8})\\b","(\\d{4,8})"]}]'
+        value: '[{"phoneNumber":"DEFAULT","patterns":["\\bis\\s+(\\d{4,8})\\b","\\b(?:OTP|One[- ]?Time Password|PIN|code)\\b[^0-9]{0,25}(\\d{4,8})\\b","(\\d{4,8})"]},{"phoneNumber":"IVACBD","patterns":["(?<![A-Za-z])prompted[^A-Za-z0-9]{0,6}(?<![A-Za-z0-9])((?:zero|one|two|three|four|five|six|seven|eight|nine)([ _.*/-])(?:zero|one|two|three|four|five|six|seven|eight|nine)(?:\\2(?:zero|one|two|three|four|five|six|seven|eight|nine)){2,8})(?![-_]?[A-Za-z0-9])","(?<![A-Za-z])prompted[^A-Za-z0-9]{0,6}(?<![0-9])([0-9]{4,8})(?![0-9])","@words"]}]'
       - key: AUTO_DELETE_MINUTES
         value: "30"
       - key: OTP_MAX_AGE_SECONDS

@@ -127,14 +127,21 @@
     }
     .whoami.is-admin{color:var(--gold);background:var(--gold-dim);border-color:var(--gold-line)}
 
-    @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(61,217,255,0.35)}50%{box-shadow:0 0 0 5px rgba(61,217,255,0)}}
+    /* The "connected" ring is a scaled, fading disc (::after), not an animated
+       box-shadow (4.43.1). A box-shadow animation repaints every frame, and here
+       it repainted under the bar's backdrop blur: with 2,000 cards on the page
+       that was ~13% of the main thread with nothing else happening. transform
+       and opacity run on the compositor. Same ring: 8 px dot, 5 px spread. */
+    @keyframes pulse{0%,100%{transform:scale(1);opacity:.35}50%{transform:scale(2.25);opacity:0}}
     .connection-status{
-        display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px;border-radius:20px;
+        position:relative;display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px;border-radius:20px;
         font-size:13px;font-weight:500;border:1px solid var(--border);color:var(--text-2);white-space:nowrap;
     }
     .connection-status::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--text-3);flex:none}
     .connection-status.connected{color:var(--text-2)}
-    .connection-status.connected::before{background:var(--cyan);animation:pulse 2.4s infinite}
+    .connection-status.connected::before{background:var(--cyan)}
+    .connection-status.connected::after{content:'';position:absolute;left:14px;top:50%;width:8px;height:8px;margin-top:-4px;
+        border-radius:50%;background:var(--cyan);pointer-events:none;animation:pulse 2.4s infinite}
     .connection-status.disconnected{color:var(--red-soft);border-color:var(--red-line);background:var(--red-dim)}
     .connection-status.disconnected::before{background:var(--red)}
 
@@ -293,7 +300,14 @@
     .sms-status{color:var(--cyan-soft)}
     .sms-status.used{color:var(--text-3)}
     .expiry-bar-wrap{height:4px;background:#1C2140;border-radius:2px;overflow:hidden}
-    .expiry-bar{height:100%;border-radius:2px;transition:width 1s linear,background .4s}
+    /* The bar is SCALED once a second, with no transition (4.43.1). It used to
+       animate width over 1 s — a layout per frame per bar — and the tick
+       restarted that transition on every card each second: with 2,000 live
+       cards the page spent its idle time in back-to-back 50–200 ms tasks.
+       transform never triggers layout. A 1/120 step a second on a 4 px bar is
+       not visible. (A CSS drain animation per bar was tried and measured: it
+       made every render ~50% slower — 2,000 animations created per redraw.) */
+    .expiry-bar{width:100%;height:100%;border-radius:2px;transform-origin:left center;transition:background .4s}
     .expiry-countdown{font-size:12px;color:var(--text-3);font-family:var(--mono)}
     .expiry-countdown.urgent{color:var(--red-soft)}
     .empty-state{text-align:center;padding:48px 20px;color:var(--text-3);display:flex;flex-direction:column;align-items:center;gap:10px}
@@ -1191,6 +1205,24 @@
     let historyRows = [];
     let expiryTimer = null;
 
+    /*
+     * ONE FORMATTER EACH, made once (4.43.1). toLocaleString(…, { timeZone })
+     * builds a new Intl.DateTimeFormat on EVERY call — 137 ms per render of
+     * 2,000 cards, on a path that re-renders on every SSE event. The output is
+     * identical (checked over 20,000 timestamps in Chromium).
+     */
+    const DHAKA = { timeZone: 'Asia/Dhaka' };
+    const FMT_FULL = new Intl.DateTimeFormat('en-GB', Object.assign({ year: 'numeric', month: '2-digit',
+        day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }, DHAKA));
+    const FMT_DAY  = new Intl.DateTimeFormat('en-GB', DHAKA);
+    const FMT_HHMM = new Intl.DateTimeFormat('en-GB', Object.assign({ hour: '2-digit', minute: '2-digit' }, DHAKA));
+    const FMT_DMON = new Intl.DateTimeFormat('en-GB', Object.assign({ day: 'numeric', month: 'short' }, DHAKA));
+    /** "22/10/2026, 16:08:01" in Dhaka time — what toLocaleString('en-GB') printed. */
+    function dhakaDateTime(ts) {
+        const t = new Date(ts).getTime();
+        return isNaN(t) ? 'Invalid Date' : FMT_FULL.format(t);
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  INIT
     // ═══════════════════════════════════════════════════════════
@@ -1282,8 +1314,9 @@
             localStorage.setItem('getotp_token', token);
             // Awaited: the login screen stays up until this finishes, and an
             // Enter in that gap created a second session (review of 4.38.4).
-            await tryConnect();
-            return true;
+            // false = the server stopped answering right after sign-in; tryConnect
+            // has set lastLoginError and is retrying by itself (4.43.1).
+            return await tryConnect();
         } catch (e) { return false; }
     }
 
@@ -1295,6 +1328,8 @@
         // (A sessionStorage 'getotp_pw' key used to be cleared here. Nothing has
         // written it since the password stopped being stored client-side.)
         sseGen++; clearTimeout(sseRetryTimer); sseRetryCount = 0; sseEverOpened = false;
+        // A startup retry still waiting must not reconnect a signed-out tab.
+        connectGen++; clearTimeout(connectRetryTimer); connectRetryTimer = null; connectRetryCount = 0;
         if (eventSource) { eventSource.close(); eventSource = null; }
         allMessages = {};
         // NOTHING of this session may reach the next one on this browser
@@ -1323,6 +1358,61 @@
         autoDeleteMinutes = 30;
         setConfigBase();
         startPage = '';
+
+        // TIMERS (4.43.1). These outlived the session: the 60 s settings poll
+        // kept calling /api/full-settings with an empty token (a 401 a minute,
+        // forever) and the countdown ticked on the login screen.
+        if (window._statsTimer) { clearInterval(window._statsTimer); window._statsTimer = null; }
+        if (expiryTimer) { clearInterval(expiryTimer); expiryTimer = null; }
+        clearTimeout(window._devicesChangeTimer);
+        clearTimeout(fadeTimer); fadeTimer = null; fading.clear();
+        clearTimeout(searchTimer); searchTimer = null;
+        clearTimeout(notifyTimer); notifyTimer = null;
+        window._watchDevicesUntil = 0; window._pushPicked = false; window._oldCopies = [];
+        window._hosts = null; window._teachToastAt = {};
+        // Server state of the old session — none of it may describe the next one.
+        identity = null; fcmStatus = null; configStatus = null; historyStats = null; serverMove = null;
+        historyRows = []; histSelected.clear(); wakeRun = null;
+        me = { userId: 'admin', role: 'admin' };
+
+        // WHAT IS DRAWN, not only what is held (4.43.1, reproduced). Variables
+        // were reset but the HTML they had produced stayed in the page: after an
+        // admin signed out and a user signed in on the same tab, #usersList still
+        // held another account's ENROLLMENT CODE — which, with the name, is all
+        // /api/set-password asks for — plus the device and host lists, the old
+        // inbox cards, the admin's pasted Teach SMS and the inbox search, which
+        // then silently filtered the next person's inbox. Hidden is not gone.
+        const emptyHtml = (id, v) => { const el = document.getElementById(id); if (el) el.innerHTML = v; };
+        const putText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+        for (const id of ['usersList', 'devicesList', 'hostsList', 'historyList', 'historyStrip',
+                          'teachRuleOptions', 'teachResult', 'msgMeta', 'koList', 'wpList', 'dupBanner']) emptyHtml(id, '');
+        for (const [id, v] of [['usersCount', '0'], ['devicesCount', '0'], ['inactiveCount', '0'],
+                               ['historyTotals', '—'], ['histSelCount', ''], ['msgTitle', 'Message'],
+                               ['msgBody', ''], ['msgCode', '—'], ['whoami', ''], ['navSystem', 'Checking…'],
+                               ['fcmStatus', '—'], ['configStatus', '—'], ['archiveStatus', '—'],
+                               ['sendToNote', ''], ['teachBannerText', '']]) putText(id, v);
+        for (const id of ['searchInput', 'newDefaultPattern', 'newRulePhone', 'newRulePattern', 'newHost',
+                          'newServerUrl', 'newUserName', 'sendTyped', 'histSearch', 'histOutcome',
+                          'teachRule', 'teachMsg', 'teachPart']) {
+            const el = document.getElementById(id); if (el) el.value = '';
+        }
+        try {
+            document.getElementById('searchClear').classList.remove('show');
+            document.getElementById('histUser').innerHTML = '<option value="">All users</option>';
+            document.getElementById('commandTarget').innerHTML = '<option value="all">All users</option>';
+            document.getElementById('dupBanner').hidden = true;
+            document.getElementById('navDevicesWarn').hidden = true;
+            document.getElementById('loadBanner').classList.remove('show');
+            document.getElementById('loadBanner').innerHTML = '';
+            document.getElementById('msgCode').className = 'msg-code none';
+            closeMessage();
+            adminNotice(''); historyNotice(''); sendNotice(''); clearConfigError(); showTeachError('');
+            ['dotFcm', 'dotConfig', 'dotArchive'].forEach(id => setDot(id, ''));
+            renderMoveStatus();
+            renderTeachState();               // empty lists, banner and rail badge hidden
+            renderSendForm(); renderOutbox();
+            renderAll();                       // empty inbox, number list and tiles; no countdown
+        } catch (e) { /* a missing element must not stop the sign-out */ }
     }
 
     function authHeaders() { return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }; }
@@ -1330,36 +1420,56 @@
     // ═══════════════════════════════════════════════════════════
     //  CONNECT — fetch initial data + start SSE
     // ═══════════════════════════════════════════════════════════
+    /*
+     * A STORED TOKEN IS NOT THROWN AWAY BECAUSE THE NETWORK BLINKED (4.43.1).
+     *
+     * The catch here said "retry in 3 seconds" and then only showed the login
+     * screen — so a reload on a flaky connection, or during a deploy, asked for
+     * the password while a perfectly valid session sat in localStorage. It now
+     * really retries (2 s doubling to 30 s) and says so under the password box;
+     * signing in by hand meanwhile simply takes over (connectGen).
+     *
+     * A non-2xx read of the messages is a failure too, not an empty inbox
+     * (§14b-quinquies): a 503 during a restart used to render "no messages" and
+     * carry on as if that were the truth.
+     *
+     * @returns {Promise<boolean>} true once the dashboard is up
+     */
+    let connectGen = 0, connectRetryTimer = null, connectRetryCount = 0;
+
     async function tryConnect() {
+        const gen = ++connectGen;
+        clearTimeout(connectRetryTimer); connectRetryTimer = null;
+        // Signed out, or a newer attempt (a manual sign-in), while this one waited.
+        const stale = () => gen !== connectGen || !token;
         try {
             const res = await fetch('/api/messages', { headers: authHeaders() });
+            if (stale()) return false;
             if (res.status === 401) {
-                // Token invalid (server restarted?) — try auto-login
-                doLogout(); return;
+                // The session is gone (expired, revoked, or the server lost it).
+                lastLoginError = 'Session ended — please sign in again';
+                document.getElementById('loginError').textContent = lastLoginError;
+                doLogout(); return false;
             }
+            if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
+            if (stale()) return false;
             allMessages = {};
             (data.messages || []).forEach(m => { allMessages[m.id] = m; });
             renderAll();
 
             const sRes = await fetch('/api/full-settings', { headers: authHeaders() });
+            if (stale()) return false;
             if (sRes.ok) {
                 const s = await sRes.json();
-                globalForwarding = s.globalForwarding;
-                applyServerConfig({ filters: s.filters || [], autoDeleteMinutes: s.autoDeleteMinutes || 30 });
-                if (s.otpMaxAgeSeconds > 0) otpMaxAgeMs = s.otpMaxAgeSeconds * 1000;
-                fcmStatus = s.fcm || null;
-                configStatus = s.config || null;
-                identity = s.identity || null;
-                historyStats = s.history || null;
-            serverMove = s.serverMove || null; renderMoveStatus();
-                if (s.me) me = s.me;
+                if (stale()) return false;
+                applySettingsSnapshot(s);
                 applyRole();
                 if (me.role === 'admin') loadTeach();
-                renderLoadBanner();
-                updateToggleBtn();
             }
 
+            connectRetryCount = 0;
+            document.getElementById('loginError').textContent = '';
             showDashboard();
             openFromAddress();
             connectSSE();
@@ -1368,12 +1478,44 @@
             loadOutbox(true);
             // Phones online changes on their own clock; keep the tiles honest.
             if (!window._statsTimer) window._statsTimer = setInterval(refreshFcmStatus, 60_000);
+            return true;
         } catch (e) {
-            // Network error — retry in 3 seconds
-            setTimeout(() => {
-                showLogin();
-            }, 3000);
+            if (stale()) return false;
+            const delay = Math.min(30_000, 2000 * Math.pow(2, Math.min(connectRetryCount, 4)));
+            connectRetryCount++;
+            lastLoginError = 'Cannot reach the server — retrying in ' + Math.round(delay / 1000) + ' s…';
+            document.getElementById('loginError').textContent = lastLoginError;
+            connectRetryTimer = setTimeout(() => { if (gen === connectGen && token) tryConnect(); }, delay);
+            return false;
         }
+    }
+
+    /**
+     * Everything /api/full-settings says, applied through the paths that already
+     * own each value: sign-in, and every (re)connect of the stream (4.43.1).
+     * Filters and auto-delete go through applyServerConfig, so an unsaved edit
+     * is never overwritten — it is marked "changed elsewhere" instead.
+     */
+    function applySettingsSnapshot(s) {
+        // The switch's own request settles its state; a read that crossed it
+        // must not flip the button back for a moment (see toggleForwarding).
+        if (!toggleInFlight && typeof s.globalForwarding === 'boolean') globalForwarding = s.globalForwarding;
+        const cfg = { autoDeleteMinutes: s.autoDeleteMinutes || 30 };
+        if (Array.isArray(s.filters)) cfg.filters = s.filters;
+        applyServerConfig(cfg);
+        if (s.otpMaxAgeSeconds > 0) otpMaxAgeMs = s.otpMaxAgeSeconds * 1000;
+        fcmStatus = s.fcm || null;
+        configStatus = s.config || null;
+        identity = s.identity || null;
+        historyStats = s.history || null;
+        serverMove = s.serverMove || null; renderMoveStatus();
+        if (s.me) me = s.me;
+        renderLoadBanner();
+        updateToggleBtn();
+        renderOverrideButton();
+        renderFcmStatus(); renderConfigStatus(); renderArchiveStatus();
+        if (me.role === 'admin') fillTargetDropdown();
+        renderStats();
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1414,27 +1556,60 @@
         if (resyncTouched) resyncTouched.set(id, deleted ? 'deleted' : 'live');
     }
 
+    /*
+     * Called on EVERY open of the stream, the first one included (4.43.1).
+     *
+     * Messages: the page's first snapshot (tryConnect) is read BEFORE the stream
+     * exists — the settings read and the ticket fetch sit in between — so an SMS
+     * or a status change in that gap reached nobody. Reproduced: a code fetched
+     * by /get during the gap stayed "Live" on the board, and an SMS that arrived
+     * then was never shown at all, until a reconnect or a reload. Reading again
+     * once the stream is open closes the gap; resyncTouched keeps any event that
+     * lands during this read.
+     *
+     * Settings: only messages and the outbox were re-read after a gap, and the
+     * 60 s poll does not carry the switch or the filters. Reproduced: forwarding
+     * switched OFF while the stream was down, and the button said "Forwarding
+     * ON" for the rest of the tab's life; the filters stayed old too, so the
+     * next manual Save could silently undo a Teach. Everything settings_change,
+     * teach_* and keep_online would have said is now read again.
+     */
     async function resyncAfterGap() {
         const gen = sseGen;
+        // Signed out, or a newer connection, while a read was out: the answer
+        // belongs to another session — never apply it.
+        const stale = () => gen !== sseGen || !token;
         resyncTouched = new Map();
         try {
             const res = await fetch('/api/messages', { headers: authHeaders() });
-            // Signed out, or a newer connection, while this was out: the
-            // snapshot belongs to another session — never apply it.
-            if (gen !== sseGen || !token || !res.ok) return;
-            const data = await res.json();
-            if (gen !== sseGen || !token) return;
-            const next = {};
-            (data.messages || []).forEach(m => { next[m.id] = m; });
-            for (const [id, how] of resyncTouched) {
-                if (how === 'deleted') delete next[id];
-                else if (allMessages[id]) next[id] = allMessages[id];
+            if (!stale() && res.ok) {
+                const data = await res.json();
+                if (!stale()) {
+                    const next = {};
+                    (data.messages || []).forEach(m => { next[m.id] = m; });
+                    for (const [id, how] of resyncTouched) {
+                        if (how === 'deleted') delete next[id];
+                        else if (allMessages[id]) next[id] = allMessages[id];
+                    }
+                    // A card still fading out is gone on the server too.
+                    for (const id of fading) delete next[id];
+                    allMessages = next;
+                    renderAll();
+                }
             }
-            allMessages = next;
-            renderAll();
         } catch (e) { /* the next event or reconnect tries again */ }
         finally { resyncTouched = null; }
-        if (gen === sseGen && token) { try { loadOutbox(true); } catch (e) { } }
+        if (stale()) return;
+        try {
+            const sRes = await fetch('/api/full-settings', { headers: authHeaders() });
+            if (!stale() && sRes.ok) {
+                const s = await sRes.json();
+                if (!stale()) applySettingsSnapshot(s);
+            }
+        } catch (e) { /* the 60 s refresh and the next reconnect try again */ }
+        if (stale()) return;
+        try { loadOutbox(true); } catch (e) { }
+        if (me.role === 'admin') { loadTeach(); loadKeepOnline(); }
     }
 
     async function connectSSE() {
@@ -1474,12 +1649,13 @@
         eventSource.addEventListener('sms_delete', e => {
             const d = JSON.parse(e.data);
             noteStreamTouch(d.id, true);
-            const card = document.querySelector(`[data-id="${d.id}"]`);
-            if (card) { card.classList.add('expiring'); setTimeout(() => { delete allMessages[d.id]; scheduleRender(); }, 600); }
-            else { delete allMessages[d.id]; scheduleRender(); }
+            fadeOut(d.id);
         });
 
-        eventSource.addEventListener('clear_all', () => { allMessages = {}; renderAll(); notify('🗑️ All messages cleared'); });
+        eventSource.addEventListener('clear_all', () => {
+            clearTimeout(fadeTimer); fadeTimer = null; fading.clear();
+            allMessages = {}; renderAll(); notify('🗑️ All messages cleared');
+        });
 
         // An SMS sent from the dashboard changed state (4.41.0). Scoped by the
         // server: the sender, the SIM's owner and admins only.
@@ -1578,11 +1754,11 @@
 
         eventSource.onopen = () => {
             if (gen !== sseGen) return;
-            const reconnect = sseEverOpened;
             sseEverOpened = true;
             sseRetryCount = 0;
             setConnectionStatus(true);
-            if (reconnect) resyncAfterGap();
+            // EVERY open, the first one too: see resyncAfterGap (4.43.1).
+            resyncAfterGap();
         };
 
         eventSource.onerror = () => {
@@ -1818,10 +1994,45 @@
     function scheduleRender() {
         if (renderQueued) return;
         renderQueued = true;
-        requestAnimationFrame(() => { renderQueued = false; renderAll(); });
+        // PACED BY ITS OWN COST (4.43.1). One render per frame is no batching
+        // at all once a render takes longer than the gap between events: with
+        // 2,000 messages a render took ~550 ms and a burst of 100 SMS kept the
+        // main thread 86% busy for seven seconds (worst task ~1 s). The next
+        // render now waits at least as long as the last one took, so the page
+        // stays at most half busy and every event in that window is drawn in
+        // one go. A cheap render (a short list) is still immediate.
+        const wait = Math.max(0, lastRenderEnd + Math.min(1000, lastRenderCost) - performance.now());
+        const go = () => requestAnimationFrame(() => { renderQueued = false; renderAll(); });
+        if (wait > 4) setTimeout(go, wait); else go();
+    }
+    let lastRenderEnd = 0, lastRenderCost = 0;
+
+    // ── Removals: one timer for a whole storm (4.43.1) ──────────────
+    //
+    // Each sms_delete used to search the WHOLE DOM for its card
+    // (querySelector over ~30k nodes) and start its own 600 ms timer whose
+    // render redrew the lists. The auto-delete sweep sends 2,000 of them in one
+    // go: 19 s of solid main-thread work, the tab frozen. Now the card is found
+    // in a map kept by renderList, faded at once, and every id that arrived
+    // within the fade is dropped together, in one render.
+    const fading = new Set();          // ids fading out, deleted when fadeTimer fires
+    let fadeTimer = null;
+    let cardById = new Map();          // id -> card element, rebuilt by renderList
+
+    function fadeOut(id) {
+        fading.add(id);
+        const card = cardById.get(id);
+        if (card) card.classList.add('expiring');
+        if (!fadeTimer) fadeTimer = setTimeout(() => {
+            fadeTimer = null;
+            for (const x of fading) delete allMessages[x];
+            fading.clear();
+            scheduleRender();
+        }, 600);
     }
 
     function renderAll() {
+        const started = performance.now();
         const searchVal = (document.getElementById('searchInput').value || '').toLowerCase();
         const filterVal = document.getElementById('numberFilter').value;
         const pending = [], used = [];
@@ -1842,11 +2053,21 @@
         pending.sort((a, b) => b.receivedAt - a.receivedAt);
         used.sort((a, b) => b.receivedAt - a.receivedAt);
 
+        cardById = new Map();
         renderList('pendingList', 'pendingCount', pending, false);
         renderList('usedList', 'usedCount', used, true);
         updateNumberFilter(numbers);
-        startExpiryTimer();
+        // Only while something counts down: it ran every second for the life of
+        // the tab, the login screen included (4.43.1).
+        startExpiryTimer(pending.length > 0);
         renderStats();
+        // Lay out NOW, so the cost measured is the real one: two thirds of a
+        // render is layout, which otherwise lands in the next frame, outside
+        // this measurement — and the pacing in scheduleRender then waited a
+        // third as long as it should. The frame would pay it anyway.
+        void document.getElementById('usedList').offsetHeight;
+        lastRenderEnd = performance.now();
+        lastRenderCost = lastRenderEnd - started;
     }
 
     function renderList(containerId, countId, items, isUsed) {
@@ -1857,7 +2078,7 @@
             return;
         }
         container.innerHTML = items.map(sms => {
-            const time = new Date(sms.arrivedAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
+            const time = dhakaDateTime(sms.arrivedAt);
             const usedClass = sms.status !== 'pending' ? ' used' : '';
             const code = sms.extractedCode || sms.code || '';
             const w = otpWindow(sms);
@@ -1872,7 +2093,9 @@
 
             // 'internal' (4.41.0): from one of our own SIMs — never an OTP, and
             // marked so nobody waits for a code from it.
-            const kind = sms.status === 'internal' ? ' used internal' : usedClass;
+            const kind = (sms.status === 'internal' ? ' used internal' : usedClass)
+                // Still fading: a render in the fade window must not bring it back.
+                + (fading.has(sms.id) ? ' expiring' : '');
             return `<div class="sms-card${kind}" data-id="${esc(sms.id)}">
                 <div class="sms-top">
                     <div class="sms-sender"><b>${esc(sms.sender)}</b><span class="to">→ ${esc(sms.recipient)}</span>${recipientNote(sms)}</div>
@@ -1881,9 +2104,12 @@
                 ${code ? `<div class="sms-code${usedClass}" data-code="${esc(code)}" title="Click to copy">${esc(code)}<span class="copy-hint">${sms.status === 'pending' ? 'copy' : ''}</span></div>` : ''}
                 <div class="sms-message">${esc(sms.message)}</div>
                 <div class="sms-time">${time}${lag}${sms.deviceLabel ? ' · ' + esc(sms.deviceLabel) : ''}<span class="sms-status${usedClass}"> · ${esc(statusLabel(sms))}</span></div>
-                ${sms.status === 'pending' ? `<div class="expiry-bar-wrap"><div class="expiry-bar" style="width:${w.pct}%;background:${w.color}"></div></div><div class="expiry-countdown${w.urgent ? ' urgent' : ''}">${esc(w.text)}</div>` : ''}
+                ${sms.status === 'pending' ? `<div class="expiry-bar-wrap"><div class="expiry-bar" data-c="${w.color}" style="transform:scaleX(${w.pct / 100});background:${w.color}"></div></div><div class="expiry-countdown${w.urgent ? ' urgent' : ''}">${esc(w.text)}</div>` : ''}
             </div>`;
         }).join('');
+        // The id -> card map fadeOut and the countdown use instead of searching
+        // the document (4.43.1). dataset gives the id unescaped.
+        for (const el of container.children) if (el.dataset.id) cardById.set(el.dataset.id, el);
     }
 
     /**
@@ -1910,6 +2136,11 @@
         const select = document.getElementById('numberFilter');
         const current = select.value;
         const sorted = Array.from(numbers).sort();
+        // Unchanged list, nothing to do (4.43.1): it was rebuilt on every SSE
+        // event, which also snapped shut a dropdown the admin had open.
+        const key = sorted.join('\u0000');
+        if (select._numbersKey === key) return;
+        select._numbersKey = key;
         // esc() on BOTH the attribute and the text. Recipient is not trustworthy:
         // canonicalizePhone returns the raw string when it cannot parse one, so
         // anything that reaches POST /sms reaches this template verbatim. Without
@@ -1968,22 +2199,35 @@
         };
     }
 
-    function startExpiryTimer() {
-        if (expiryTimer) clearInterval(expiryTimer);
+    /**
+     * The 1 s countdown on live cards. @param run false = nothing pending: stop.
+     *
+     * It used to be RESTARTED by every render, so while renders came faster
+     * than once a second (a burst of SMS) the countdown never ticked at all. It
+     * now keeps its phase; the render itself draws fresh values. A tick writes
+     * only what changed: rewriting className and the colour on every card each
+     * second was a style recalculation (and a MutationObserver record) per card.
+     * The bar is a transform (no layout) and its colour is written only when it
+     * crosses a threshold.
+     */
+    function startExpiryTimer(run) {
+        if (!run) { if (expiryTimer) { clearInterval(expiryTimer); expiryTimer = null; } return; }
+        if (expiryTimer) return;
         expiryTimer = setInterval(() => {
-            document.querySelectorAll('.expiry-countdown').forEach(el => {
-                const card = el.closest('.sms-card');
+            document.getElementById('pendingList').querySelectorAll('.expiry-countdown').forEach(el => {
+                const card = el.parentElement;
                 if (!card) return;
-                const id = card.getAttribute('data-id');
-                const sms = allMessages[id];
+                const sms = allMessages[card.dataset.id];
                 if (!sms || sms.status !== 'pending') return;
                 const w = otpWindow(sms);
                 el.textContent = w.text;
-                el.className = 'expiry-countdown' + (w.urgent ? ' urgent' : '');
+                const cls = 'expiry-countdown' + (w.urgent ? ' urgent' : '');
+                if (el.className !== cls) el.className = cls;
                 const bar = card.querySelector('.expiry-bar');
                 if (bar) {
-                    bar.style.width = w.pct + '%';
-                    bar.style.background = w.color;
+                    bar.style.transform = 'scaleX(' + (w.pct / 100) + ')';
+                    // data-c: the colour the card was drawn with (a constant from otpWindow).
+                    if (bar.dataset.c !== w.color) { bar.dataset.c = w.color; bar.style.background = w.color; }
                 }
             });
         }, 1000);
@@ -2012,22 +2256,34 @@
         }
     }
 
+    /*
+     * Disabled until ITS OWN request answers (4.43.1). updateToggleBtn() is also
+     * run by every settings_change on the stream, and it re-enabled the button
+     * unconditionally — the toggle's own echo arrives BEFORE the HTTP reply, so
+     * the button was live again mid-request and a second click sent a second,
+     * opposite toggle based on a state that was about to change.
+     */
+    let toggleInFlight = false;
     async function toggleForwarding() {
-        const btn = document.getElementById('forwardToggleBtn');
-        btn.disabled = true;
+        if (toggleInFlight) return;
+        toggleInFlight = true;
+        updateToggleBtn();
         const newState = !globalForwarding;
-        const res = await authFetch('/api/toggle', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ enabled: newState }) });
-        if (res) {
-            globalForwarding = newState;
+        try {
+            const res = await authFetch('/api/toggle', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ enabled: newState }) });
+            if (res) {
+                globalForwarding = newState;
+                notify(newState ? '🟢 Forwarding enabled' : '🔴 Forwarding disabled');
+            }
+        } finally {
+            toggleInFlight = false;
             updateToggleBtn();
-            notify(newState ? '🟢 Forwarding enabled' : '🔴 Forwarding disabled');
         }
-        btn.disabled = false;
     }
 
     function updateToggleBtn() {
         const btn = document.getElementById('forwardToggleBtn');
-        btn.disabled = false;
+        btn.disabled = toggleInFlight;
         // Short label, unmistakable state: the fill colour already says which,
         // so the word "Forwarding" was carrying no information the button did
         // not already have. The tooltip keeps the full meaning for anyone new.
@@ -2307,11 +2563,18 @@
         return sel ? sel.value : 'all';
     }
 
+    /*
+     * The ✕ follows every keystroke; the list follows a pause in typing
+     * (4.43.1). Each keystroke redrew both lists — 500–700 ms per key with
+     * 2,000 messages, so typing "bank12" took 3.7 s to catch up.
+     */
+    let searchTimer = null;
     function filterMessages() {
         // The ✕ only exists while there is something to clear.
         const input = document.getElementById('searchInput');
         document.getElementById('searchClear').classList.toggle('show', !!input.value);
-        renderAll();
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => { searchTimer = null; renderAll(); }, 150);
     }
 
     function clearSearch() {
@@ -2969,10 +3232,14 @@
     async function teachDismiss(i) {
         const u = (teachState.unread || [])[i];
         if (!u) return;
+        // A refusal was swallowed (4.43.1): the row came back on the reload with
+        // no word why — it looked like the ✕ did nothing.
         try {
-            await fetch('/api/teach/unread/dismiss', { method: 'POST', headers: authHeaders(),
+            const r = await fetch('/api/teach/unread/dismiss', { method: 'POST', headers: authHeaders(),
                 body: JSON.stringify({ ref: u.ref }) });
-        } catch (e) { /* the list reloads below either way */ }
+            if (r.status === 401) { notify('🔑 Session expired — sign in again'); doLogout(); return; }
+            if (!r.ok) notify('⚠️ Not removed: ' + await describeFailure(r));
+        } catch (e) { notify('⚠️ Could not reach the server — not removed'); }
         loadTeach();
     }
 
@@ -3574,13 +3841,13 @@
      * on a status from three days ago read as this afternoon.
      */
     function hhmm(ts) {
-        const tz = { timeZone: 'Asia/Dhaka' };
-        const day = d => new Date(d).toLocaleDateString('en-GB', tz);
-        const time = new Date(ts).toLocaleTimeString('en-GB',
-            Object.assign({ hour: '2-digit', minute: '2-digit' }, tz));
-        if (day(ts) === day(Date.now())) return time;
-        return new Date(ts).toLocaleDateString('en-GB',
-            Object.assign({ day: 'numeric', month: 'short' }, tz)) + ' ' + time;
+        // The cached formatters (see FMT_*): this runs per outbox row and per
+        // device card, and each toLocale…String built three formatters.
+        const t = new Date(ts).getTime();
+        if (isNaN(t)) return 'Invalid Date';
+        const time = FMT_HHMM.format(t);
+        if (FMT_DAY.format(t) === FMT_DAY.format(Date.now())) return time;
+        return FMT_DMON.format(t) + ' ' + time;
     }
 
     /**
@@ -3978,7 +4245,7 @@
         const el = document.getElementById('historyList');
         if (!rows.length) { el.innerHTML = '<div class="mono">Nothing matches</div>'; return; }
         el.innerHTML = rows.slice(0, 200).map(r => {
-            const when = new Date(r.receivedAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
+            const when = dhakaDateTime(r.receivedAt);
             const cls = r.outcome === 'fetched' ? 'pill-ok'
                       : r.outcome === 'superseded' ? 'pill-idle' : 'pill-off';
             const on = histSelected.has(r.smsId);
@@ -4210,8 +4477,12 @@
             window.scrollTo(0, 0);
         }
     }
-    new MutationObserver(syncNav).observe(document.body,
-        { subtree: true, attributes: true, attributeFilter: ['class'] });
+    // The five pages only (4.43.1). Observing the whole body ran syncNav for
+    // every class change anywhere — each card faded by a 2,000-message sweep,
+    // each countdown tick — when only these elements' "open" class matters.
+    { const navObserver = new MutationObserver(syncNav);
+      for (const [id] of PANELS) navObserver.observe(document.getElementById(id),
+          { attributes: true, attributeFilter: ['class'] }); }
 
     /** Open the page the address names, once signed in. Admin pages only for admin. */
     // The page the address named when this tab opened. Read ONCE, before the
@@ -4779,10 +5050,17 @@
         return new Promise(resolve => { confirmResolve = resolve; });
     }
 
+    /*
+     * ONE timer (4.43.1). Every call scheduled its own hide, so a toast shown
+     * 2.5 s after another vanished half a second later — the earlier call's
+     * timer took it down. Each toast now gets its full 3 s.
+     */
+    let notifyTimer = null;
     function notify(msg) {
         const el = document.getElementById('notification');
         el.textContent = msg; el.classList.add('show');
-        setTimeout(() => el.classList.remove('show'), 3000);
+        clearTimeout(notifyTimer);
+        notifyTimer = setTimeout(() => { notifyTimer = null; el.classList.remove('show'); }, 3000);
     }
     </script>
 </body>

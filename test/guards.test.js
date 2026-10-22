@@ -53,24 +53,31 @@ function child(env, code, label) {
 // Reversing the call order is the whole test: it must not matter.
 // ═════════════════════════════════════════════════════════════════════════════
 {
+    // firebase-admin 14: the modular entry points (lib/firebase.js) — faked
+    // with the same rule as the real SDK: a second initializeApp() throws.
     const FAKE_ADMIN = `
-const fake = {
-    apps: [],
+const apps = [];
+const fakeApp = {
+    getApps: () => apps.slice(),
+    getApp: () => { if (!apps.length) throw new Error('no app'); return apps[0]; },
     initializeApp() {
-        if (fake.apps.length) {
+        if (apps.length) {
             const e = new Error('The default Firebase app already exists.');
             e.code = 'app/duplicate-app';
             throw e;
         }
-        fake.apps.push({ name: '[DEFAULT]' });
-        return fake.apps[0];
+        apps.push({ name: '[DEFAULT]' });
+        return apps[0];
     },
-    credential: { cert: () => ({}) },
-    firestore: () => ({ collection: () => ({ doc: () => ({}) }) }),
-    messaging: () => ({ send: async () => 'projects/x/messages/1' })
+    cert: () => ({})
 };
-const p = require.resolve('firebase-admin');
-require.cache[p] = { id: p, filename: p, loaded: true, exports: fake, children: [], paths: [] };
+const fakeMessaging = { getMessaging: () => ({ send: async () => 'projects/x/messages/1' }) };
+const fakeFirestore = { getFirestore: () => ({ collection: () => ({ doc: () => ({}) }) }) };
+for (const [m, exp] of [['firebase-admin/app', fakeApp], ['firebase-admin/messaging', fakeMessaging],
+                        ['firebase-admin/firestore', fakeFirestore]]) {
+    const p = require.resolve(m);
+    require.cache[p] = { id: p, filename: p, loaded: true, exports: exp, children: [], paths: [] };
+}
 `;
     const ENV = {
         FIREBASE_SERVICE_ACCOUNT: JSON.stringify({ project_id: 'p', client_email: 'e', private_key: 'k' }),

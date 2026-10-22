@@ -62,7 +62,8 @@ assert.strictEqual(
     assert.strictEqual(extractCode('prompted Four-Two-Six-One to continue.', 'IVACBD', N, userRule), '4261',
         'the hyphen format must keep working with the same pattern');
     assert.strictEqual(convertTextToNumber('Seven_Seven_Eight_Zero_Five_Zero'), '778050');
-    assert.strictEqual(convertTextToNumber('one.two three four'), '1234');
+    assert.strictEqual(convertTextToNumber('one two three four'), '1234');
+    assert.strictEqual(convertTextToNumber('one.two three four'), null, 'mixed separators: unclear, no code');
     assert.strictEqual(convertTextToNumber('one two three'), null, 'never a code under 4 digits');
     assert.strictEqual(convertTextToNumber('someone'), null, 'a word INSIDE a word is not a digit');
     assert.strictEqual(convertTextToNumber('Hello_World'), null,

@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.43.0
+ * server.js — GetOTP Render Server v4.43.2
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -53,6 +53,14 @@
 
 const crypto  = require('crypto');
 const express = require('express');
+
+// firebase-admin 14 needs Node 22+ (server 4.43.2). On an older runtime FCM and
+// Firestore fail at init — the OTP path itself keeps working (it never touches
+// Firebase), so say it loudly instead of letting it look like a config error.
+if (Number(process.versions.node.split('.')[0]) < 22) {
+    console.error(`[server] Node ${process.versions.node} — this server needs Node 22+ (firebase-admin 14). `
+        + 'Set NODE_VERSION=22 on Render (an old NODE_VERSION in the dashboard overrides package.json).');
+}
 const path    = require('path');
 const store   = require('./lib/store');
 const otp     = require('./lib/otp');
@@ -98,7 +106,12 @@ store.setUnreadHook((sms, rule, likely) => {
 });
 
 const app = express();
-app.use(express.json({ limit: '100kb' }));
+// A JSON value such as {"toString": 1} makes String(value) THROW — found by
+// fuzzing every route (review, 4.43.1): a 500 from /api/send/retry, /cancel,
+// /report, /register, /set-url, /users… No real field has these names, so they
+// are dropped while parsing, once, for every route.
+const HOSTILE_KEYS = new Set(['toString', 'valueOf']);
+app.use(express.json({ limit: '100kb', reviver: (k, v) => (HOSTILE_KEYS.has(k) ? undefined : v) }));
 
 /**
  * Wrap an async route so a rejected promise becomes a normal Express error.
@@ -1102,7 +1115,10 @@ app.post('/api/teach/example/delete', requireAdmin, (req, res) => {
 app.post('/api/teach/unread/dismiss', requireAdmin, (req, res) => {
     const { ref } = req.body || {};
     if (typeof ref !== 'string') return res.status(400).json({ error: 'ref required' });
-    res.json({ success: teach.dismissUnread(ref) });
+    const ok = teach.dismissUnread(ref);
+    // Every open admin tab drops it too (they reload on teach_change).
+    if (ok) store.broadcast('teach_change', { at: Date.now() }, { adminOnly: true });
+    res.json({ success: ok });
 });
 
 // Update auto-delete minutes
@@ -1288,10 +1304,17 @@ app.post('/api/set-url', usersGate, requireAdmin, (req, res) => {
     // One at a time: a slow check finishing after a newer move must not undo it.
     if (moveInFlight) return res.status(409).json({ error: 'Another move is being checked — wait for it to finish.' });
     moveInFlight = true;
+    const gen = ++moveGeneration;
     (async () => {
         const pre = await move.preflight(raw, process.env.API_KEY, process.env.DASHBOARD_PASSWORD,
                                          undefined, undefined, SERVER_ID);
         if (!pre.ok) return res.status(400).json({ error: pre.error });
+        // Stop pressed while the new server was being checked (up to ~45 s):
+        // that answer said "cancelled" — the move must not then go out to every
+        // phone anyway (review, 4.43.1).
+        if (gen !== moveGeneration) {
+            return res.status(409).json({ error: 'Cancelled while the new server was being checked — no phone was moved.' });
+        }
         const ts = Date.now();
         move.set(raw, ts, who, (req.session && req.session.userId) || 'admin');
         fcm.send('set_url', ts, who ? 'user_' + who : undefined, { url: raw });
@@ -1307,13 +1330,17 @@ app.post('/api/set-url', usersGate, requireAdmin, (req, res) => {
         .finally(() => { moveInFlight = false; });
 });
 let moveInFlight = false;
+/** Bumped by a cancel: a check still running when it is pressed must not move anyone. */
+let moveGeneration = 0;
 
 // Stop a pending move: phones not yet moved stay here. Phones that moved stay
 // moved — push this server's address from the new one to bring them back.
 app.post('/api/set-url/cancel', usersGate, requireAdmin, (req, res) => {
+    const checking = moveInFlight;
+    moveGeneration++;                        // a check in flight now ends without moving anyone
     const was = move.clear();
     store.broadcast('settings_change', { key: 'serverMove', value: null }, { adminOnly: true });
-    res.json({ success: true, cancelled: !!was });
+    res.json({ success: true, cancelled: !!was || checking });
 });
 
 // Force a re-read of config and identity from Firestore.
@@ -1594,7 +1621,9 @@ app.get('/api/history/summary', historyGate, requireAdmin, asyncRoute(async (req
 
     const byDay = {};
     for (const r of rows) {
-        const day = new Date(r.receivedAt).toISOString().slice(0, 10);
+        // Dhaka day (UTC+6, no DST) — the operator's day, as everywhere else;
+        // a 03:00 SMS was counted under the previous date (review, 4.43.1).
+        const day = new Date(Number(r.receivedAt) + 6 * 3600_000).toISOString().slice(0, 10);
         if (!byDay[day]) byDay[day] = { day, total: 0, fetched: 0, expired: 0, superseded: 0, no_code: 0, cleared: 0 };
         byDay[day].total++;
         if (byDay[day][r.outcome] !== undefined) byDay[day][r.outcome]++;
@@ -1792,6 +1821,10 @@ async function shutdown(signal) {
     hardStop.unref();
 
     try { server.close(); } catch (e) { /* already closed */ }
+    // The outbox starts NOW, alongside the config and identity saves — it used
+    // to wait behind up to 8 s of them and 2 s of alerts inside the 10 s
+    // deadline, so a slow Firestore at a deploy reached it last (review, 4.43.1).
+    const outboxEarly = outbox.flush().catch(() => { /* logged inside */ });
     // LOOP, not once. flushNow awaits a write already in flight; a newer save
     // queued behind it is re-armed on a 0 ms timer that would otherwise fire
     // after process.exit. Repeat until nothing is pending or the deadline nears.
@@ -1812,6 +1845,7 @@ async function shutdown(signal) {
         await Promise.race([alerts.flushSms(), new Promise(r => setTimeout(r, 2000))]);
     } catch (e) { /* fcm.send logs */ }
     // The outbox queue: a job created just before a deploy must survive it.
+    await outboxEarly;
     try { await outbox.flush(); } catch (e) { /* logged inside */ }
     try {
         const n = await history.drain(Date.now() + SHUTDOWN_DEADLINE_MS - 1000);
