@@ -19,7 +19,7 @@ services:
     # pending write first (server 4.37.0).
     healthCheckPath: /health
     envVars:
-      # firebase-admin 14 (server 4.43.2) needs Node 22+. Render takes the
+      # firebase-admin 14 (server 4.44.0) needs Node 22+. Render takes the
       # FIRST of: NODE_VERSION (here / the dashboard), .node-version, .nvmrc,
       # package.json engines ("22"). A NODE_VERSION left at 20 in the
       # dashboard would override this — server.js logs a loud error if so.

@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.43.2
+ * server.js — GetOTP Render Server v4.44.0
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -34,7 +34,7 @@
  *   POST /api/clear-all   → Delete all SMS (dashboard token auth)
  *   POST /api/filters     → Update filter rules (dashboard token auth)
  *   GET  /api/teach, POST /api/teach/test, /api/teach/apply, /api/teach/example/delete,
- *   POST /api/teach/unread/dismiss
+ *   POST /api/teach/unread/dismiss, /api/teach/suggestions/apply, /api/teach/suggestions/dismiss
  *                         → Teach from SMS: SMS + code part → verified pattern (admin)
  *   POST /api/auto-delete → Update auto-delete minutes (dashboard token auth)
  *   GET  /api/full-settings→ Full settings for dashboard (dashboard token auth)
@@ -54,7 +54,7 @@
 const crypto  = require('crypto');
 const express = require('express');
 
-// firebase-admin 14 needs Node 22+ (server 4.43.2). On an older runtime FCM and
+// firebase-admin 14 needs Node 22+ (server 4.44.0). On an older runtime FCM and
 // Firestore fail at init — the OTP path itself keeps working (it never touches
 // Firebase), so say it loudly instead of letting it look like a config error.
 if (Number(process.versions.node.split('.')[0]) < 22) {
@@ -103,6 +103,23 @@ store.setUnreadHook((sms, rule, likely) => {
     store.broadcast('teach_unread', { ref: entry.ref, rule: entry.rule, at: entry.at, likely: !!likely },
         { adminOnly: true });
     if (likely) alerts.smsUnread(rule);
+});
+// Auto-teach suggestions (4.44.0): when universal extracts a code from a sender
+// with no specific rule, try to build a pattern and queue it as a one-click
+// suggestion on the Teach dashboard.
+store.setSuggestionHook((sms) => {
+    if (!store.teachReady()) return;       // config not settled — skip quietly
+    const code = sms.extractedCode;
+    if (!code) return;
+    const result = teach.trySuggestion(sms, code,
+        store.getSettings().filters, store.getFilterExamples());
+    if (!result) return;
+    const s = result.suggestion;
+    store.broadcast('teach_suggestion', {
+        ref: s.ref, rule: s.rule, sender: s.sender, code: s.code,
+        pattern: s.pattern, anchor: s.anchor, at: s.at
+    }, { adminOnly: true });
+    console.log(`[teach] Suggestion for "${s.rule}": ${JSON.stringify(s.pattern)} (anchor: ${s.anchor})`);
 });
 
 const app = express();
@@ -1004,6 +1021,7 @@ app.post('/api/filters', requireAdmin, (req, res) => {
 
     store.setFilters(filters);
     teach.resolveUnread(store.getSettings().filters);
+    teach.resolveSuggestions(store.getSettings().filters);
     // Taught examples these filters now read wrong. A WARNING, not a refusal:
     // removing a format on purpose must stay possible — but never silently.
     const warnings = teach.brokenExamples(store.getSettings().filters, store.getFilterExamples());
@@ -1043,8 +1061,9 @@ function publicAnalysis(a) {
 app.get('/api/teach', requireAdmin, (req, res) => {
     const filters = store.getSettings().filters;
     res.json({
-        unread:   teach.listUnread(),
-        examples: store.getFilterExamples(),
+        unread:      teach.listUnread(),
+        suggestions: teach.listSuggestions(),
+        examples:    store.getFilterExamples(),
         // Sender rules to choose from — DEFAULT is never taught.
         rules:    filters.filter(r => r && r.phoneNumber !== 'DEFAULT').map(r => String(r.phoneNumber)),
         broken:   teach.brokenExamples(filters, store.getFilterExamples())
@@ -1093,6 +1112,7 @@ app.post('/api/teach/apply', requireAdmin, (req, res) => {
         { rule: a.rule, sender: a.sender, recipient: a.recipient, message, code: a.code, at: Date.now() });
     store.setFilters(a.proposedFilters, examples);
     const resolved = teach.resolveUnread(store.getSettings().filters);
+    teach.resolveSuggestions(store.getSettings().filters);
     store.broadcast('teach_change', { at: Date.now() }, { adminOnly: true });
     // The SMS that is waiting right now (if it is still in its OTP window) was
     // re-read by setFilters — say so, because that is the OTP someone needs.
@@ -1117,6 +1137,80 @@ app.post('/api/teach/unread/dismiss', requireAdmin, (req, res) => {
     if (typeof ref !== 'string') return res.status(400).json({ error: 'ref required' });
     const ok = teach.dismissUnread(ref);
     // Every open admin tab drops it too (they reload on teach_change).
+    if (ok) store.broadcast('teach_change', { at: Date.now() }, { adminOnly: true });
+    res.json({ success: ok });
+});
+
+// ═════════════════════════════════════════════════════════════════
+//  Auto-teach suggestions (4.44.0)
+//
+// Apply: re-runs analyze() to verify the suggestion is still valid against
+// the CURRENT filters, then applies exactly like manual Teach — same gate,
+// same checks, same example saved. The operator clicked one button; the
+// safety is the same as Teach.
+// ═════════════════════════════════════════════════════════════════
+app.post('/api/teach/suggestions/apply', requireAdmin, (req, res) => {
+    const { ref } = req.body || {};
+    if (typeof ref !== 'string') return res.status(400).json({ error: 'ref required' });
+
+    // Find the suggestion.
+    const all = teach.listSuggestions();
+    const s = all.find(x => x.ref === ref);
+    if (!s) return res.status(404).json({ error: 'Suggestion not found — it may have expired or been dismissed.' });
+
+    // The filters may have changed since the suggestion was queued.
+    // Re-run analyze() with the CURRENT state, exactly like Teach Apply does.
+    if (!store.teachReady()) {
+        return res.status(503).json({ error: 'The saved filters have not loaded yet — try again in a moment.' });
+    }
+    const a = teach.analyze({
+        message:   s.message,
+        otpPart:   s.code,
+        rule:      s.rule,
+        sender:    s.sender,
+        recipient: s.recipient,
+        filters:   store.getSettings().filters,
+        examples:  store.getFilterExamples()
+    });
+    if (!a.ok) return res.status(400).json({ error: a.error });
+    if (!a.canApply) {
+        return res.status(400).json({ error: 'Cannot apply — it would break a message that reads correctly today.',
+                                      problems: a.blocked });
+    }
+
+    // Same validation gate as manual Teach and manual save.
+    const problems = [];
+    for (const rule of a.proposedFilters) {
+        const why = otp.validateRule(rule);
+        if (why) { problems.push(`${rule.phoneNumber}: ${why}`); continue; }
+        for (const p of rule.patterns || []) {
+            const w = otp.validatePattern(p);
+            if (w) problems.push(`${rule.phoneNumber}: ${w}`);
+        }
+    }
+    if (problems.length) return res.status(400).json({ error: 'Some patterns would never match', problems });
+
+    // Apply: save the pattern and the taught example.
+    const examples = teach.addExample(store.getFilterExamples(),
+        { rule: a.rule, sender: a.sender, recipient: a.recipient,
+          message: s.message, code: a.code, at: Date.now() });
+    store.setFilters(a.proposedFilters, examples);
+    teach.resolveUnread(store.getSettings().filters);
+    teach.resolveSuggestions(store.getSettings().filters);
+    teach.dismissSuggestion(ref);
+    store.broadcast('teach_change', { at: Date.now() }, { adminOnly: true });
+    console.log(`[teach] Suggestion applied for "${a.rule}": ${JSON.stringify(a.pattern)}`);
+
+    const waiting = store.recentMessages(200).reverse()
+        .find(m => m.message === s.message && m.code);
+    res.json({ success: true, rule: a.rule, code: a.code, pattern: a.pattern,
+               waitingNowReads: waiting ? waiting.code : null });
+});
+
+app.post('/api/teach/suggestions/dismiss', requireAdmin, (req, res) => {
+    const { ref } = req.body || {};
+    if (typeof ref !== 'string') return res.status(400).json({ error: 'ref required' });
+    const ok = teach.dismissSuggestion(ref);
     if (ok) store.broadcast('teach_change', { at: Date.now() }, { adminOnly: true });
     res.json({ success: ok });
 });

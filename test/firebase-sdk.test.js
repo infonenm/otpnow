@@ -1,5 +1,5 @@
 /**
- * test/firebase-sdk.test.js — server 4.43.2: the REAL firebase-admin works.
+ * test/firebase-sdk.test.js — server 4.44.0: the REAL firebase-admin works.
  *
  * Every other suite fakes Firebase. This one loads the real SDK (14.x, with
  * @google-cloud/firestore 9.x) — offline, with a generated service account —
