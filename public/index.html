@@ -3665,7 +3665,20 @@
         const now = Date.now();
         const isLive = d => d.lastSeen && now - d.lastSeen < 90_000;
         const rank = d => copies.has(d.id) ? 2 : (isLive(d) ? 0 : 1);
-        devices.sort((a, b) => rank(a) - rank(b) || (b.lastActive || 0) - (a.lastActive || 0));
+        // STABLE, OWNER-GROUPED (review, 4.44.0). Three sort keys:
+        //   1. rank — ONLINE above OFFLINE above OLD COPIES (unchanged)
+        //   2. owner — same user's phones sit next to each other, unassigned
+        //      devices ("") sort last within each rank group
+        //   3. device name — stable tiebreaker within the same owner
+        //
+        // The old sort used lastActive as the tiebreaker, which changes every
+        // 30 s when a phone polls. Two online devices with alternating poll
+        // cycles swapped positions on every redraw — the list visually
+        // "jumped" constantly. Owner + name never change between redraws.
+        const ownerKey = d => d.effectiveOwner || d.userId || '￿';
+        devices.sort((a, b) => rank(a) - rank(b)
+            || ownerKey(a).localeCompare(ownerKey(b))
+            || (a.name || a.id).localeCompare(b.name || b.id));
         const GROUPS = ['ONLINE', 'OFFLINE', 'OLD COPIES'];
         let lastGroup = -1;
         el.innerHTML = devices.map(d => {

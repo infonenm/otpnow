@@ -1,5 +1,5 @@
 /**
- * server.js — GetOTP Render Server v4.44.0
+ * server.js — GetOTP Render Server v4.44.1
  *
  * VERSIONING: this server and the Android app version INDEPENDENTLY. There is
  * no single "GetOTP system version" — the app is far ahead because it changes
@@ -289,18 +289,20 @@ function requireApiKey(req, res, next) {
  * OPT-IN: if GET_KEY is unset the endpoint behaves exactly as it does today.
  * Deploy, confirm nothing broke, add the env var, then update the scripts.
  *
- * Cost: one string comparison. No round trip, no lookup, nothing measurable.
+ * Cost: one SHA-256 pair. No round trip, no lookup, nothing measurable.
+ *
+ * Uses secretEquals (hash-then-compare) instead of a length pre-check +
+ * raw timingSafeEqual. The old path leaked the key's LENGTH through timing:
+ * a wrong-length guess was rejected faster than a right-length one, letting
+ * an attacker learn how long GET_KEY is before guessing its value.
+ * secretEquals hashes both sides to 32 bytes first, so neither length nor
+ * value leaks through timing. Same approach requireApiKey already uses.
  */
 function requireGetKey(req, res, next) {
     const expected = process.env.GET_KEY || '';
     if (!expected) return next();
     const given = req.query.key || req.headers['x-get-key'] || '';
-    if (given.length !== expected.length) return res.status(401).json({ success: false, otp: '', error: 'Unauthorized' });
-    try {
-        if (!crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {
-            return res.status(401).json({ success: false, otp: '', error: 'Unauthorized' });
-        }
-    } catch (e) {
+    if (!secretEquals(given, expected)) {
         return res.status(401).json({ success: false, otp: '', error: 'Unauthorized' });
     }
     next();
@@ -476,6 +478,15 @@ app.get('/api/settings', requireApiKey, (req, res) => {
     }
     const cmds = store.commandsFor(req.query.deviceId);
     const pushName = store.usersEnabled() ? store.users.pendingUsernameFor(req.query.deviceId) : null;
+
+    // Computed ONCE, used once. Each of these was computed twice — once to
+    // check truthiness, once to get the value — on every 30-second poll from
+    // every phone. move.forDevice and outbox.dueCount iterate their whole map;
+    // keepOnline.forDevice is a lookup but the closure was recreated twice.
+    const deviceKeepOnline = req.query.deviceId && keepOnline.forDevice(req.query.deviceId);
+    const deviceMove       = move.forDevice(req.query.deviceId, id => store.users.ownerOf(id));
+    const deviceDueCount   = store.usersEnabled() ? outbox.dueCount(req.query.deviceId) : 0;
+
     res.json({
         // The EFFECTIVE answer for this device — what it should DO.
         globalForwarding: store.forwardingFor(req.query.deviceId),
@@ -516,8 +527,7 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // short lease renewed by each poll — see lib/keeponline.js. Omitted
         // until the switch is used, so an older app and an unused switch see
         // exactly what they saw before.
-        ...(req.query.deviceId && keepOnline.forDevice(req.query.deviceId)
-              ? { keepOnline: keepOnline.forDevice(req.query.deviceId) } : {}),
+        ...(deviceKeepOnline ? { keepOnline: deviceKeepOnline } : {}),
         // A username the admin pushed to THIS phone, until the phone confirms it
         // by registering with it. The poll is the carrier that survives a phone
         // without Play Services; FCM (device_<id> topic) is the fast one.
@@ -526,10 +536,8 @@ app.get('/api/settings', requireApiKey, (req, res) => {
         // for a phone FCM cannot reach; omitted when there is nothing to send.
         // A pending "Push to all phones" (4.42.0): repeated on every poll until
         // the phone has moved (app 4.38.0 applies it once per ts).
-        ...(move.forDevice(req.query.deviceId, id => store.users.ownerOf(id))
-              ? { moveTo: move.forDevice(req.query.deviceId, id => store.users.ownerOf(id)) } : {}),
-        ...(store.usersEnabled() && outbox.dueCount(req.query.deviceId) > 0
-              ? { sendDue: outbox.dueCount(req.query.deviceId) } : {}),
+        ...(deviceMove ? { moveTo: deviceMove } : {}),
+        ...(deviceDueCount > 0 ? { sendDue: deviceDueCount } : {}),
         // OMITTED when unconfigured, rather than sent as [].
         //
         // The app treats an empty list as "not configured" and allows any host —
